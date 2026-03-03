@@ -1,0 +1,11 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mc-launcher"
+version = "0.1.0"
+description = "Modular Minecraft Host Manager"
+dependencies = [
+    "requests",
+]

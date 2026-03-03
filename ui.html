@@ -1,0 +1,4399 @@
+﻿<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title id="page-title">MC - Host Manager</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Bebas+Neue&family=Inter:wght@300;400;500;600&display=swap"
+    rel="stylesheet">
+  <style>
+    :root {
+      --bg: #edf2f7;
+      --surface: #ffffff;
+      --card: #ffffff;
+      --border: #d8e1ea;
+      --accent: #2ea043;
+      --accent2: #d73a49;
+      --green: #2ea043;
+      --yellow: #bf8700;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --glow: none;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
+      font-size: 14px;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* Background grid */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(0, 229, 255, .03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 229, 255, .03) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* "" Layout "" */
+    .wrap {
+      position: relative;
+      z-index: 1;
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 24px 20px 60px;
+    }
+
+    .app-shell {
+      display: grid;
+      grid-template-columns: 220px 1fr;
+      gap: 16px;
+      align-items: start;
+    }
+
+    .main-area {
+      min-width: 0;
+    }
+
+    .sidebar {
+      position: sticky;
+      top: 18px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      background: var(--surface);
+    }
+
+    .sb-head {
+      padding: 16px 14px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .sb-title {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 22px;
+      letter-spacing: 1px;
+      color: var(--text);
+      line-height: 1;
+    }
+
+    .sb-sub {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 4px;
+      letter-spacing: 0.6px;
+    }
+
+    .sb-nav {
+      display: grid;
+      gap: 4px;
+      padding: 8px;
+    }
+
+    .sb-btn {
+      width: 100%;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      padding: 10px 10px;
+      background: transparent;
+      color: var(--text);
+      text-align: left;
+      font-size: 13px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: all .16s ease;
+    }
+
+    .sb-btn:hover {
+      border-color: var(--border);
+      background: rgba(24, 209, 255, 0.08);
+    }
+
+    .sb-btn.active {
+      border-color: var(--accent);
+      background: rgba(24, 209, 255, 0.16);
+      color: var(--accent);
+    }
+
+    .side-card-title {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    #section-sidepanel {
+      display: none;
+    }
+
+    #section-sidepanel.modal-open {
+      display: block;
+      position: fixed;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      width: min(900px, 94vw);
+      max-height: 86vh;
+      z-index: 1260;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+    }
+
+    #section-sidepanel.modal-open .card-body {
+      max-height: 86vh;
+      overflow: auto;
+    }
+
+    .panel-head-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .panel-close {
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--muted);
+      border-radius: 8px;
+      padding: 6px 11px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    #sidepanel-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(3, 8, 18, 0.72);
+      backdrop-filter: blur(2px);
+      z-index: 1250;
+      display: none;
+    }
+
+    #sidepanel-overlay.open {
+      display: block;
+    }
+
+    .adv-toggle {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 12px;
+      margin-top: 12px;
+    }
+
+    .adv-wrap {
+      display: none;
+      margin-top: 10px;
+    }
+
+    .adv-wrap.open {
+      display: block;
+    }
+
+    /* "" Header "" */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 20px 28px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      margin-bottom: 24px;
+      gap: 16px;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .logo-icon {
+      width: 44px;
+      height: 44px;
+      background: linear-gradient(135deg, #00e5ff22, #00e5ff55);
+      border: 1px solid var(--accent);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 22px;
+      box-shadow: var(--glow);
+    }
+
+    .logo h1 {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 26px;
+      letter-spacing: 2px;
+      color: #fff;
+      line-height: 1;
+    }
+
+    .logo p {
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 1px;
+      margin-top: 2px;
+    }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .player-badge {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 14px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .player-badge strong {
+      color: var(--accent);
+      display: block;
+      font-size: 14px;
+    }
+
+    /* "" Main grid "" */
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 340px;
+      gap: 20px;
+    }
+
+    .left {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .right {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    /* "" Card "" */
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .card-header {
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 11px;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    .card-header .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--muted);
+      flex-shrink: 0;
+    }
+
+    .card-body {
+      padding: 20px;
+    }
+
+    /* "" Big host button "" */
+    .host-section {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+      padding: 32px 20px;
+    }
+
+    .host-action-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .btn-host {
+      width: 180px;
+      height: 180px;
+      border-radius: 50%;
+      border: 2px solid var(--accent);
+      background: radial-gradient(circle at center, #00e5ff15, transparent 70%);
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 28px;
+      letter-spacing: 3px;
+      color: var(--accent);
+      transition: all .3s ease;
+      position: relative;
+      box-shadow: 0 0 30px #00e5ff22;
+    }
+
+    .btn-host .icon {
+      font-size: 40px;
+    }
+
+    .btn-host-secondary {
+      min-width: 148px;
+      height: 62px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: linear-gradient(180deg, #112947 0%, #0d2139 100%);
+      color: var(--muted);
+      font-family: 'Inter', sans-serif;
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: .4px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      cursor: pointer;
+      transition: all .2s ease;
+      box-shadow: 0 2px 8px rgba(8, 20, 36, 0.25);
+    }
+
+    .btn-host-secondary:hover {
+      transform: translateY(-1px);
+      color: #d8f2ff;
+      border-color: #2f5d88;
+      background: linear-gradient(180deg, #17355a 0%, #12304f 100%);
+    }
+
+    .btn-host-secondary:disabled {
+      cursor: not-allowed;
+      color: #7f90a9;
+      border-color: #2a3b56;
+      background: #18263b;
+      box-shadow: none;
+      transform: none;
+    }
+
+    .btn-host:hover {
+      background: radial-gradient(circle at center, #00e5ff25, transparent 70%);
+      box-shadow: 0 0 50px #00e5ff44;
+      transform: scale(1.03);
+    }
+
+    .btn-host.running {
+      border-color: var(--accent2);
+      color: var(--accent2);
+      background: radial-gradient(circle at center, #ff3d5715, transparent 70%);
+      box-shadow: 0 0 30px #ff3d5722;
+    }
+
+    .btn-host.running:hover {
+      box-shadow: 0 0 50px #ff3d5744;
+    }
+
+    .btn-host.disabled {
+      border-color: var(--muted);
+      color: var(--muted);
+      cursor: not-allowed;
+      background: transparent;
+      box-shadow: none;
+    }
+
+    .btn-host .pulse-ring {
+      position: absolute;
+      inset: -8px;
+      border-radius: 50%;
+      border: 1px solid var(--accent);
+      animation: pulse-ring 2s ease infinite;
+      opacity: 0;
+    }
+
+    .btn-host.running .pulse-ring {
+      border-color: var(--accent2);
+    }
+
+    @keyframes pulse-ring {
+      0% {
+        transform: scale(1);
+        opacity: .6;
+      }
+
+      100% {
+        transform: scale(1.15);
+        opacity: 0;
+      }
+    }
+
+    .host-status-text {
+      font-size: 13px;
+      color: var(--muted);
+      text-align: center;
+      line-height: 1.6;
+      max-width: 260px;
+    }
+
+    /* "" Status bar "" */
+    .status-bar {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 1px;
+      background: var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    .status-cell {
+      background: var(--surface);
+      padding: 14px 16px;
+      text-align: center;
+    }
+
+    .status-cell .label {
+      font-size: 10px;
+      color: var(--muted);
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+
+    .status-cell .value {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 15px;
+      margin-top: 4px;
+    }
+
+
+    .val-green {
+      color: var(--green);
+    }
+
+    .val-red {
+      color: var(--accent2);
+    }
+
+    .val-blue {
+      color: var(--accent);
+    }
+
+    .val-yellow {
+      color: var(--yellow);
+    }
+
+    .val-muted {
+      color: var(--muted);
+    }
+
+    /* "" Progress bar "" */
+    .progress-wrap {
+      display: none;
+      flex-direction: column;
+      gap: 8px;
+      padding: 16px 20px;
+      border-top: 1px solid var(--border);
+      background: var(--surface);
+    }
+
+    .quick-action-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin: 0 20px 14px;
+    }
+
+    .quick-action-grid .btn-backup {
+      padding: 10px 8px;
+      font-size: 12px;
+    }
+
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin: 0 20px 14px;
+    }
+
+    .metric-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 10px;
+    }
+
+    .metric-head {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }
+
+    .metric-head .v {
+      font-family: 'Share Tech Mono', monospace;
+      color: var(--text);
+    }
+
+    .metric-canvas {
+      width: 100%;
+      height: 48px;
+      display: block;
+    }
+
+    .progress-wrap.visible {
+      display: flex;
+    }
+
+    .progress-msg {
+      font-size: 12px;
+      color: var(--accent);
+      font-family: 'Share Tech Mono', monospace;
+    }
+
+    .progress-bar-outer {
+      height: 4px;
+      background: var(--border);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+
+    .progress-bar-inner {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent), #0080ff);
+      border-radius: 2px;
+      transition: width .3s ease;
+      width: 0%;
+    }
+
+    /* "" Log console "" */
+    .log-wrap {
+      background: #060a0e;
+      border-radius: 8px;
+      height: 240px;
+      overflow-y: auto;
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 11px;
+      padding: 12px;
+      line-height: 1.7;
+      color: #5a8a6a;
+    }
+
+    .log-wrap.focus {
+      box-shadow: 0 0 0 1px var(--accent), 0 0 20px rgba(24, 209, 255, 0.35);
+    }
+
+    .log-wrap::-webkit-scrollbar {
+      width: 4px;
+    }
+
+    .log-wrap::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    .log-wrap::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 2px;
+    }
+
+    .log-line {
+      color: #5a8a6a;
+    }
+
+    .log-line.info {
+      color: #7ab8e0;
+    }
+
+    .log-line.warn {
+      color: var(--yellow);
+    }
+
+    .log-line.err {
+      color: var(--accent2);
+    }
+
+    .log-line.done {
+      color: var(--green);
+    }
+
+    .log-dash {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    .log-pill {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      padding: 8px 10px;
+      text-align: center;
+    }
+
+    .log-pill .k {
+      font-size: 10px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .log-pill .v {
+      margin-top: 4px;
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 15px;
+      color: var(--text);
+    }
+
+    .issues-list {
+      margin-top: 10px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      max-height: 220px;
+      overflow: auto;
+    }
+
+    .issue-row {
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--border);
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 11px;
+      color: var(--text);
+      line-height: 1.5;
+    }
+
+    .issue-row:last-child {
+      border-bottom: none;
+    }
+
+    .issue-row.err {
+      color: #ff8ea3;
+    }
+
+    .issue-row.warn {
+      color: #ffd37a;
+    }
+
+    .issue-meta {
+      display: inline-block;
+      margin-right: 8px;
+      padding: 1px 6px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      font-size: 10px;
+      color: var(--muted);
+    }
+
+    /* Console input */
+    .console-input {
+      display: flex;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .console-input input {
+      flex: 1;
+      background: #060a0e;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 12px;
+      color: var(--accent);
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 12px;
+      outline: none;
+    }
+
+    .console-input input:focus {
+      border-color: var(--accent);
+    }
+
+    .console-input input::placeholder {
+      color: var(--muted);
+    }
+
+    .btn-send {
+      background: var(--border);
+      border: none;
+      border-radius: 6px;
+      padding: 0 14px;
+      color: var(--text);
+      cursor: pointer;
+      font-size: 14px;
+      transition: background .2s;
+    }
+
+    .btn-send:hover {
+      background: var(--accent);
+      color: #000;
+    }
+
+    /* "" Who is hosting card "" */
+    .host-info {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .host-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 14px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 12px;
+    }
+
+    .host-row .k {
+      color: var(--muted);
+    }
+
+    .host-row .v {
+      font-family: 'Share Tech Mono', monospace;
+      color: var(--text);
+    }
+
+    .host-row .v.active {
+      color: var(--green);
+    }
+
+    .btn-force {
+      width: 100%;
+      padding: 10px;
+      background: transparent;
+      border: 1px solid var(--accent2);
+      border-radius: 8px;
+      color: var(--accent2);
+      font-size: 12px;
+      cursor: pointer;
+      transition: background .2s;
+      margin-top: 4px;
+    }
+
+    .btn-force:hover {
+      background: #ff3d5715;
+    }
+
+    /* "" Backup list "" */
+    .backup-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-height: 220px;
+      overflow-y: auto;
+    }
+
+    .backup-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      gap: 10px;
+      font-size: 11px;
+    }
+
+    .backup-item .b-icon {
+      font-size: 18px;
+      flex-shrink: 0;
+    }
+
+    .backup-item .b-info {
+      flex: 1;
+    }
+
+    .backup-item .b-name {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 10px;
+      color: var(--muted);
+    }
+
+    .backup-item .b-time {
+      color: var(--text);
+      margin-top: 2px;
+    }
+
+    .backup-item .b-size {
+      color: var(--accent);
+      font-family: 'Share Tech Mono', monospace;
+      flex-shrink: 0;
+    }
+
+    .btn-backup {
+      width: 100%;
+      padding: 11px;
+      background: transparent;
+      border: 1px solid var(--accent);
+      border-radius: 8px;
+      color: var(--accent);
+      font-size: 12px;
+      cursor: pointer;
+      transition: background .2s;
+      letter-spacing: 1px;
+    }
+
+    .btn-backup:hover {
+      background: #00e5ff15;
+    }
+
+    .btn-backup:disabled {
+      opacity: .55;
+      cursor: not-allowed;
+    }
+
+    /* "" Settings "" */
+    .form-row {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      margin-bottom: 14px;
+    }
+
+    .form-row label {
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+
+    .form-row input {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      padding: 9px 12px;
+      color: var(--text);
+      font-size: 13px;
+      font-family: 'Share Tech Mono', monospace;
+      outline: none;
+      transition: border-color .2s;
+    }
+
+    .form-row input:focus {
+      border-color: var(--accent);
+    }
+
+    .form-row select {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      padding: 9px 12px;
+      color: var(--text);
+      font-size: 13px;
+      font-family: 'Share Tech Mono', monospace;
+      outline: none;
+      transition: border-color .2s;
+    }
+
+    .form-row select:focus {
+      border-color: var(--accent);
+    }
+
+    .ram-row {
+      display: grid;
+      grid-template-columns: minmax(140px, 1fr) minmax(100px, 1fr);
+      gap: 8px;
+      align-items: end;
+    }
+
+    .ram-custom-wrap {
+      display: none;
+    }
+
+    .ram-help {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 4px;
+      line-height: 1.35;
+    }
+
+    .btn-save {
+      width: 100%;
+      padding: 11px;
+      background: var(--accent);
+      border: none;
+      border-radius: 8px;
+      color: #000;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      letter-spacing: 1px;
+      transition: opacity .2s;
+    }
+
+    .btn-save:hover {
+      opacity: .85;
+    }
+
+    /* "" Tabs "" */
+    .tabs {
+      display: flex;
+      gap: 2px;
+      margin-bottom: 16px;
+    }
+
+    .tab {
+      flex: 1;
+      text-align: center;
+      padding: 9px 6px;
+      font-size: 11px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      cursor: pointer;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      color: var(--muted);
+      transition: all .2s;
+    }
+
+    .tab.active {
+      background: var(--accent);
+      color: #000;
+      border-color: var(--accent);
+    }
+
+    .tab-panel {
+      display: none;
+    }
+
+    .tab-panel.active {
+      display: block;
+    }
+
+    /* "" Toast "" */
+    #toast {
+      position: fixed;
+      bottom: 28px;
+      right: 28px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 20px;
+      font-size: 13px;
+      max-width: 320px;
+      opacity: 0;
+      transform: translateY(10px);
+      transition: all .3s ease;
+      pointer-events: none;
+      z-index: 1600;
+      border-left: 3px solid var(--accent);
+    }
+
+    #toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    #toast.err {
+      border-left-color: var(--accent2);
+    }
+
+    /* "" Responsive "" */
+    @media (max-width: 780px) {
+      .app-shell {
+        grid-template-columns: 1fr;
+      }
+
+      .sidebar {
+        position: static;
+      }
+
+      .sb-nav {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .grid {
+        grid-template-columns: 1fr;
+      }
+
+      .right {
+        display: contents;
+      }
+      .metrics-grid {
+        grid-template-columns: 1fr;
+      }
+      .quick-action-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+      .host-action-row {
+        width: 100%;
+      }
+      .btn-host,
+      .btn-host-secondary {
+        width: 100%;
+        max-width: 320px;
+      }
+    }
+
+    .no-backups {
+      color: var(--muted);
+      font-size: 12px;
+      text-align: center;
+      padding: 20px;
+    }
+
+    /* download link styling (backup list already defined earlier) */
+    .b-download a {
+      display: inline-block;
+      text-decoration: none;
+      color: var(--accent);
+      font-size: 16px;
+    }
+    .b-download a:hover { color: var(--accent2); }
+
+    .badge-online {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      color: var(--green);
+      background: #39ff1415;
+      border: 1px solid #39ff1440;
+      border-radius: 20px;
+      padding: 3px 10px;
+    }
+
+    .badge-online::before {
+      content: '';
+      width: 6px;
+      height: 6px;
+      background: var(--green);
+      border-radius: 50%;
+      animation: blink 1.5s ease infinite;
+    }
+
+    @keyframes blink {
+
+      0%,
+      100% {
+        opacity: 1
+      }
+
+      50% {
+        opacity: .3
+      }
+    }
+
+    .badge-offline {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      color: var(--muted);
+      background: #ffffff08;
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 3px 10px;
+    }
+
+    /* "" Status Panel Grid "" */
+    .status-panel-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    .status-item-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      transition: all 0.2s ease;
+      cursor: pointer;
+    }
+
+    .status-item-card:hover {
+      border-color: var(--accent);
+      background: #00e5ff08;
+      transform: translateY(-1px);
+    }
+
+    .status-item-icon {
+      width: 38px;
+      height: 38px;
+      border-radius: 8px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+    }
+
+    .status-item-info {
+      flex: 1;
+    }
+
+    .status-item-label {
+      font-size: 10px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 2px;
+    }
+
+    .status-item-value {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 13px;
+      color: #fff;
+      line-height: 1.25;
+      word-break: break-word;
+    }
+
+    /* "" Wizard Overlay "" */
+    #wizard-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(4, 6, 9, 0.95);
+      backdrop-filter: blur(8px);
+      z-index: 1000;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .wizard-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      width: 100%;
+      max-width: 500px;
+      overflow: hidden;
+      box-shadow: 0 0 50px rgba(0, 0, 0, 0.5);
+    }
+
+    .wizard-header {
+      padding: 30px;
+      text-align: center;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .wizard-header h2 {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 32px;
+      letter-spacing: 2px;
+      color: var(--accent);
+    }
+
+    .wizard-body {
+      padding: 30px;
+      min-height: 280px;
+    }
+
+    .wizard-step {
+      display: none;
+    }
+
+    .wizard-step.active {
+      display: block;
+      animation: fadeIn 0.3s ease;
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .wizard-footer {
+      padding: 20px 30px;
+      background: rgba(255, 255, 255, 0.03);
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .btn-wizard {
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 14px;
+      transition: all 0.2s;
+    }
+
+    .btn-next {
+      background: var(--accent);
+      color: #000;
+      border: none;
+    }
+
+    .btn-prev {
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid var(--border);
+    }
+
+    .btn-wizard:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .dir-list {
+      background: #060a0e;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      max-height: 200px;
+      overflow-y: auto;
+      margin-top: 10px;
+    }
+
+    .dir-item {
+      padding: 8px 12px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 12px;
+      transition: background 0.1s;
+    }
+
+    .dir-item:hover {
+      background: rgba(0, 229, 255, 0.1);
+    }
+
+    .dir-item.selected {
+      background: rgba(0, 229, 255, 0.2);
+    }
+
+    .auto-detect-box {
+      background: rgba(0, 229, 255, 0.05);
+      border: 1px dashed var(--accent);
+      border-radius: 12px;
+      padding: 20px;
+      text-align: center;
+      margin-bottom: 20px;
+    }
+
+    .players-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(3, 10, 18, 0.82);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1200;
+      padding: 20px;
+    }
+
+    .players-modal.open {
+      display: flex;
+    }
+
+    .players-card {
+      width: 100%;
+      max-width: 980px;
+      min-height: 70vh;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+    }
+
+    .players-head {
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-family: 'Share Tech Mono', monospace;
+    }
+
+    .players-close {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      border-radius: 8px;
+      padding: 5px 10px;
+      cursor: pointer;
+    }
+
+    .players-body {
+      padding: 12px 14px 16px;
+      max-height: 75vh;
+      overflow: auto;
+      display: grid;
+      gap: 10px;
+      align-content: start;
+    }
+
+    .players-intro {
+      padding: 12px 14px 0;
+    }
+
+    .players-summary {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--card);
+      padding: 10px 12px;
+      font-family: 'Share Tech Mono', monospace;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .player-row {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 12px;
+      background: var(--card);
+    }
+
+    .player-name {
+      font-family: 'Bebas Neue', sans-serif;
+      letter-spacing: 1px;
+      font-size: 22px;
+      color: var(--accent);
+    }
+
+    .player-meta {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 4px;
+      line-height: 1.4;
+    }
+
+    .player-stat-line {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: 6px;
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .player-bars {
+      display: grid;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .bar-wrap {
+      display: grid;
+      grid-template-columns: 72px 1fr 48px;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .bar-wrap .k {
+      font-size: 11px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .6px;
+    }
+
+    .bar-track {
+      height: 8px;
+      border-radius: 999px;
+      background: rgba(148, 163, 184, 0.2);
+      overflow: hidden;
+    }
+
+    .bar-fill {
+      height: 100%;
+      border-radius: inherit;
+      transition: width .2s ease;
+    }
+
+    .bar-fill.hp {
+      background: linear-gradient(90deg, #ef4444, #f87171);
+    }
+
+    .bar-fill.hg {
+      background: linear-gradient(90deg, #f59e0b, #facc15);
+    }
+
+    .bar-num {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 12px;
+      color: var(--text);
+      text-align: right;
+    }
+
+    .stat-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(3, 10, 18, 0.72);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1300;
+      padding: 20px;
+    }
+
+    .stat-modal.open {
+      display: flex;
+    }
+
+    .stat-card {
+      width: min(540px, 100%);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+      transform: scale(0.97);
+      opacity: 0;
+      animation: statZoom .16s ease forwards;
+    }
+
+    @keyframes statZoom {
+      to {
+        transform: scale(1);
+        opacity: 1;
+      }
+    }
+
+    .stat-head {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-family: 'Share Tech Mono', monospace;
+      color: var(--muted);
+    }
+
+    .stat-close {
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--muted);
+      border-radius: 7px;
+      padding: 4px 9px;
+      cursor: pointer;
+    }
+
+    .stat-body {
+      padding: 16px;
+    }
+
+    .stat-main {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 36px;
+      letter-spacing: 1.6px;
+      color: var(--accent);
+      line-height: 1.15;
+      word-break: break-word;
+    }
+
+    .stat-sub {
+      margin-top: 8px;
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .remote-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(3, 10, 18, 0.78);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1320;
+      padding: 20px;
+    }
+
+    .remote-modal.open {
+      display: flex;
+    }
+
+    .remote-card {
+      width: min(760px, 100%);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+    }
+
+    .remote-head {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-family: 'Share Tech Mono', monospace;
+      color: var(--muted);
+    }
+
+    .remote-body {
+      padding: 12px;
+      max-height: 70vh;
+      overflow: auto;
+      display: grid;
+      gap: 8px;
+    }
+
+    .remote-row {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--card);
+      padding: 10px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .remote-main {
+      min-width: 0;
+    }
+
+    .remote-title {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 22px;
+      letter-spacing: 1px;
+      color: var(--text);
+      line-height: 1;
+    }
+
+    .remote-sub {
+      margin-top: 6px;
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.35;
+      word-break: break-word;
+    }
+
+    .remote-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    /* "" Aternos-Inspired Visual Override "" */
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
+    }
+
+    body::before {
+      display: none;
+    }
+
+    .wrap {
+      max-width: 1280px;
+      padding-top: 18px;
+    }
+
+    header {
+      background: #fff;
+      border: 1px solid var(--border);
+      box-shadow: 0 1px 4px rgba(15, 23, 42, 0.06);
+    }
+
+    .logo-icon {
+      background: #e8f5ec;
+      border-color: #b7e0c1;
+      box-shadow: none;
+    }
+
+    .logo h1 {
+      font-family: 'Inter', sans-serif;
+      font-size: 28px;
+      letter-spacing: .2px;
+      color: #0f172a;
+      font-weight: 700;
+    }
+
+    .logo p {
+      color: #64748b;
+      font-size: 12px;
+      letter-spacing: .2px;
+      text-transform: none;
+    }
+
+    .player-badge {
+      background: #f8fafc;
+      border-color: var(--border);
+      color: #64748b;
+    }
+
+    .player-badge strong {
+      color: #1e3a8a;
+    }
+
+    .card {
+      background: #fff;
+      border-color: var(--border);
+      box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+    }
+
+    .card-header {
+      background: #f8fafc;
+      color: #64748b;
+      border-bottom-color: var(--border);
+      font-size: 12px;
+      letter-spacing: .3px;
+    }
+
+    .status-item-card {
+      background: #f8fafc;
+      border-color: var(--border);
+    }
+
+    .status-item-card:hover {
+      border-color: #b6c2cf;
+      background: #f1f5f9;
+    }
+
+    .status-item-icon {
+      background: #fff;
+      border-color: var(--border);
+    }
+
+    .status-item-label {
+      color: #64748b;
+      letter-spacing: .3px;
+    }
+
+    .status-item-value {
+      color: #0f172a;
+      font-family: 'Inter', sans-serif;
+      font-weight: 600;
+      font-size: 14px;
+    }
+
+    .host-section {
+      padding: 18px 20px 22px;
+    }
+
+    .btn-host {
+      width: 260px;
+      height: 62px;
+      border-radius: 10px;
+      border: 1px solid #1f7a32;
+      background: linear-gradient(180deg, #35b34e, #2ea043);
+      color: #fff;
+      font-size: 24px;
+      letter-spacing: .5px;
+      box-shadow: 0 2px 6px rgba(46, 160, 67, 0.28);
+      flex-direction: row;
+      gap: 10px;
+      font-family: 'Inter', sans-serif;
+      font-weight: 700;
+    }
+
+    .btn-host .icon {
+      font-size: 22px;
+    }
+
+    .btn-host-secondary {
+      border-color: #cbd5e1;
+      background: linear-gradient(180deg, #f8fafc, #edf2f7);
+      color: #334155;
+      box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+    }
+
+    .btn-host-secondary:hover {
+      background: linear-gradient(180deg, #ffffff, #eef4fb);
+      border-color: #b5c4d8;
+      color: #0f172a;
+    }
+
+    .btn-host-secondary:disabled {
+      background: #e2e8f0;
+      border-color: #cbd5e1;
+      color: #94a3b8;
+      box-shadow: none;
+    }
+
+    .btn-host:hover {
+      transform: translateY(-1px);
+      background: linear-gradient(180deg, #40bf5a, #31ab48);
+      box-shadow: 0 4px 10px rgba(46, 160, 67, 0.35);
+    }
+
+    .btn-host.running {
+      border-color: #b91c1c;
+      background: linear-gradient(180deg, #ef4444, #dc2626);
+      color: #fff;
+      box-shadow: 0 2px 6px rgba(220, 38, 38, 0.28);
+    }
+
+    .btn-host.running:hover {
+      box-shadow: 0 4px 10px rgba(220, 38, 38, 0.35);
+    }
+
+    .btn-host.disabled {
+      border-color: #cbd5e1;
+      background: #e2e8f0;
+      color: #64748b;
+      box-shadow: none;
+    }
+
+    .btn-host .pulse-ring {
+      display: none;
+    }
+
+    .host-status-text {
+      color: #64748b;
+      max-width: 520px;
+    }
+
+    .status-bar {
+      background: #d6dee7;
+    }
+
+    .status-cell {
+      background: #f8fafc;
+    }
+
+    .status-cell .label {
+      color: #64748b;
+    }
+
+    .status-cell .value {
+      font-family: 'Inter', sans-serif;
+      font-weight: 700;
+      font-size: 16px;
+    }
+
+    .log-wrap {
+      background: #0f172a;
+      color: #dbeafe;
+      border: 1px solid #1e293b;
+    }
+
+    .console-input input {
+      background: #f8fafc;
+      border-color: var(--border);
+      color: #0f172a;
+      font-family: 'Inter', sans-serif;
+    }
+
+    .console-input input::placeholder {
+      color: #94a3b8;
+    }
+
+    .btn-send {
+      background: #2ea043;
+      color: #fff;
+    }
+
+    .btn-send:hover {
+      background: #27853a;
+      color: #fff;
+    }
+
+    .host-row,
+    .backup-item {
+      background: #f8fafc;
+      border-color: var(--border);
+    }
+
+    .btn-force {
+      border-color: #d73a49;
+      color: #d73a49;
+      background: #fff;
+    }
+
+    .btn-force:hover {
+      background: #fff1f2;
+    }
+
+    .btn-backup {
+      border-color: #2ea043;
+      color: #2ea043;
+      background: #fff;
+      font-family: 'Inter', sans-serif;
+      font-weight: 600;
+      letter-spacing: .2px;
+      text-transform: none;
+    }
+
+    .btn-backup:hover {
+      background: #ecfdf0;
+    }
+
+    .form-row label {
+      color: #64748b;
+      letter-spacing: .3px;
+      text-transform: none;
+      font-size: 12px;
+    }
+
+    .form-row input,
+    .form-row select {
+      background: #fff;
+      border-color: var(--border);
+      color: #0f172a;
+      font-family: 'Inter', sans-serif;
+    }
+
+    .btn-save {
+      background: #2ea043;
+      color: #fff;
+      font-weight: 700;
+      letter-spacing: .2px;
+      text-transform: none;
+    }
+
+    .btn-save:hover {
+      background: #27853a;
+      opacity: 1;
+    }
+
+    .tabs {
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .tab {
+      flex: none;
+      min-width: 110px;
+      background: #f8fafc;
+      color: #475569;
+      border-color: var(--border);
+      font-size: 12px;
+      text-transform: none;
+      letter-spacing: .2px;
+    }
+
+    .tab.active {
+      background: #2ea043;
+      color: #fff;
+      border-color: #2ea043;
+    }
+
+    .players-card,
+    .wizard-card {
+      background: #fff;
+      border-color: var(--border);
+      box-shadow: 0 8px 24px rgba(2, 8, 23, 0.15);
+    }
+
+    .wizard-header h2 {
+      color: #2ea043;
+      font-family: 'Inter', sans-serif;
+      letter-spacing: .3px;
+      font-weight: 700;
+    }
+
+    .btn-next {
+      background: #2ea043;
+      color: #fff;
+    }
+
+    .btn-prev {
+      color: #475569;
+      border-color: var(--border);
+      background: #fff;
+    }
+
+    #toast {
+      background: #fff;
+      border-color: var(--border);
+      border-left-color: #2ea043;
+      color: #0f172a;
+      box-shadow: 0 8px 20px rgba(2, 8, 23, 0.15);
+    }
+
+    #toast.err {
+      border-left-color: #d73a49;
+    }
+
+    /* "" Dark Theme Override "" */
+    [data-theme="dark"] {
+      --bg: #020712;
+      --surface: #0a1224;
+      --card: #0a1224;
+      --border: #1c2b47;
+      --accent: #18d1ff;
+      --accent2: #ff4d6d;
+      --green: #4bff8a;
+      --yellow: #ffd166;
+      --text: #e8f1ff;
+      --muted: #88a1c7;
+    }
+
+    [data-theme="dark"] body {
+      background:
+        radial-gradient(1200px 700px at 10% -20%, rgba(24, 209, 255, 0.18), transparent 60%),
+        radial-gradient(900px 600px at 110% 0%, rgba(75, 255, 138, 0.10), transparent 60%),
+        #020712;
+      color: var(--text);
+    }
+
+    [data-theme="dark"] body::before {
+      display: block;
+      opacity: .34;
+      background-image:
+        linear-gradient(rgba(24, 209, 255, .06) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(24, 209, 255, .06) 1px, transparent 1px);
+      background-size: 34px 34px;
+    }
+
+    [data-theme="dark"] header,
+    [data-theme="dark"] .card,
+    [data-theme="dark"] .players-card,
+    [data-theme="dark"] .wizard-card,
+    [data-theme="dark"] .sidebar,
+    [data-theme="dark"] .stat-card {
+      background: linear-gradient(180deg, #0c1730 0%, #0a1224 100%);
+      border-color: var(--border);
+      box-shadow: 0 14px 30px rgba(0, 0, 0, 0.34);
+    }
+
+    [data-theme="dark"] .card-header,
+    [data-theme="dark"] .players-head,
+    [data-theme="dark"] .stat-head {
+      background: rgba(7, 14, 30, 0.82);
+      border-bottom-color: var(--border);
+      color: var(--muted);
+    }
+
+    [data-theme="dark"] .logo h1,
+    [data-theme="dark"] .status-item-value,
+    [data-theme="dark"] .metric-head .v,
+    [data-theme="dark"] #toast,
+    [data-theme="dark"] .bar-num {
+      color: var(--text);
+    }
+
+    [data-theme="dark"] .logo p {
+      color: var(--muted);
+    }
+
+    [data-theme="dark"] .logo-icon {
+      background: linear-gradient(140deg, rgba(24, 209, 255, 0.22), rgba(24, 209, 255, 0.05));
+      border-color: #26c7f0;
+      box-shadow: 0 0 20px rgba(24, 209, 255, 0.24);
+    }
+
+    [data-theme="dark"] .player-badge {
+      background: #0b1730;
+      border-color: var(--border);
+      color: var(--muted);
+    }
+
+    [data-theme="dark"] .sb-head {
+      border-bottom-color: var(--border);
+      background: rgba(7, 14, 30, 0.74);
+    }
+
+    [data-theme="dark"] .sb-sub,
+    [data-theme="dark"] .side-card-title {
+      color: var(--muted);
+    }
+
+    [data-theme="dark"] .sb-btn {
+      color: #cde0ff;
+    }
+
+    [data-theme="dark"] .sb-btn:hover {
+      border-color: #25406f;
+      background: rgba(24, 209, 255, 0.12);
+    }
+
+    [data-theme="dark"] .sb-btn.active {
+      border-color: #2ea7d9;
+      background: rgba(24, 209, 255, 0.22);
+      color: #97e6ff;
+    }
+
+    [data-theme="dark"] .panel-close {
+      background: #0b1730;
+      color: #cbe1ff;
+      border-color: #2a4168;
+    }
+
+    [data-theme="dark"] .player-badge strong {
+      color: #55d9ff;
+    }
+
+    [data-theme="dark"] .badge-offline {
+      background: rgba(136, 161, 199, 0.08);
+      border-color: rgba(136, 161, 199, 0.42);
+      color: #b5c6e3;
+    }
+
+    [data-theme="dark"] .badge-online {
+      background: rgba(75, 255, 138, 0.14);
+      border-color: rgba(75, 255, 138, 0.45);
+      color: #7affac;
+    }
+
+    [data-theme="dark"] .status-item-card,
+    [data-theme="dark"] .host-row,
+    [data-theme="dark"] .backup-item,
+    [data-theme="dark"] .status-cell,
+    [data-theme="dark"] .metric-card,
+    [data-theme="dark"] .tab,
+    [data-theme="dark"] .form-row input,
+    [data-theme="dark"] .form-row select,
+    [data-theme="dark"] .players-summary,
+    [data-theme="dark"] .player-row,
+    [data-theme="dark"] .log-pill,
+    [data-theme="dark"] .issues-list {
+      background: #0b1730;
+      color: var(--text);
+      border-color: var(--border);
+    }
+
+    [data-theme="dark"] .status-item-card:hover {
+      background: #0f2143;
+      border-color: #2f4d83;
+    }
+
+    [data-theme="dark"] .status-item-icon,
+    [data-theme="dark"] .stat-close,
+    [data-theme="dark"] .players-close {
+      background: rgba(232, 241, 255, 0.08);
+      border-color: var(--border);
+      color: var(--text);
+    }
+
+    [data-theme="dark"] .btn-backup {
+      background: linear-gradient(180deg, #11315f 0%, #0e274d 100%);
+      color: #90d8ff;
+      border-color: #286db5;
+      box-shadow: 0 4px 16px rgba(17, 49, 95, 0.30);
+    }
+
+    [data-theme="dark"] .btn-backup:hover {
+      background: linear-gradient(180deg, #15407d 0%, #133765 100%);
+      color: #d7efff;
+    }
+
+    [data-theme="dark"] .btn-host {
+      border-color: #1f9dd7;
+      background: linear-gradient(180deg, #14b2e2, #0f89c2);
+      color: #f4fcff;
+      box-shadow: 0 6px 18px rgba(20, 178, 226, 0.34);
+    }
+
+    [data-theme="dark"] .btn-host:hover {
+      background: linear-gradient(180deg, #20c3f3, #1498cf);
+    }
+
+    [data-theme="dark"] .btn-host.running {
+      border-color: #ff5e7e;
+      background: linear-gradient(180deg, #ff5d7b, #e43d61);
+      box-shadow: 0 6px 18px rgba(255, 93, 123, 0.32);
+    }
+
+    [data-theme="dark"] .btn-host.disabled {
+      border-color: #364969;
+      background: #1b2a44;
+      color: #8ea4c8;
+      box-shadow: none;
+    }
+
+    [data-theme="dark"] .btn-host-secondary {
+      border-color: #2e5078;
+      background: linear-gradient(180deg, #102846, #0c203a);
+      color: #96caef;
+      box-shadow: 0 4px 14px rgba(9, 26, 46, 0.3);
+    }
+
+    [data-theme="dark"] .btn-host-secondary:hover {
+      background: linear-gradient(180deg, #163760, #123052);
+      border-color: #3a6c9f;
+      color: #dff4ff;
+    }
+
+    [data-theme="dark"] .btn-host-secondary:disabled {
+      border-color: #334865;
+      background: #17263d;
+      color: #748ba8;
+      box-shadow: none;
+    }
+
+    [data-theme="dark"] .host-status-text,
+    [data-theme="dark"] .status-item-label,
+    [data-theme="dark"] .form-row label,
+    [data-theme="dark"] .status-cell .label,
+    [data-theme="dark"] .metric-head,
+    [data-theme="dark"] .player-meta,
+    [data-theme="dark"] .player-stat-line,
+    [data-theme="dark"] .stat-sub {
+      color: var(--muted);
+    }
+
+    [data-theme="dark"] .log-wrap {
+      background: #050c19;
+      color: #98d3ab;
+      border-color: #1f365e;
+    }
+
+    [data-theme="dark"] .console-input input {
+      background: #07142a;
+      color: var(--text);
+      border-color: #244272;
+    }
+
+    [data-theme="dark"] .console-input input::placeholder {
+      color: #6f87ac;
+    }
+
+    [data-theme="dark"] .btn-send {
+      background: #1898d6;
+      color: #f4fbff;
+    }
+
+    [data-theme="dark"] .btn-send:hover {
+      background: #22b2f0;
+      color: #fff;
+    }
+
+    [data-theme="dark"] .status-bar {
+      background: #172843;
+    }
+
+    [data-theme="dark"] .tab.active {
+      background: linear-gradient(180deg, #15b4e7, #0f8ec3);
+      color: #f5fcff;
+      border-color: #2fa8d9;
+    }
+
+    [data-theme="dark"] .btn-force {
+      border-color: #ff5b7b;
+      color: #ffc3cf;
+      background: rgba(255, 77, 109, 0.10);
+    }
+
+    [data-theme="dark"] .btn-force:hover {
+      background: rgba(255, 77, 109, 0.18);
+    }
+
+    [data-theme="dark"] .btn-prev {
+      background: #0b1730;
+      color: #c8d8f2;
+      border-color: var(--border);
+    }
+
+    [data-theme="dark"] .btn-next,
+    [data-theme="dark"] .btn-save {
+      background: linear-gradient(180deg, #18b8ea, #1196cc);
+      color: #f4fbff;
+      border-color: #2aa7d7;
+    }
+
+    [data-theme="dark"] .btn-save:hover,
+    [data-theme="dark"] .btn-next:hover {
+      background: linear-gradient(180deg, #24c6f7, #14a3d9);
+      opacity: 1;
+    }
+
+    [data-theme="dark"] #toast {
+      background: #0a1731;
+      border-color: #214478;
+      border-left-color: #18d1ff;
+      color: var(--text);
+    }
+
+    /* Force broad emoji/symbol fallback so icons render on Windows and Linux */
+    .logo-icon,
+    .status-item-icon,
+    .sb-btn,
+    .btn-backup,
+    .btn-force,
+    .btn-send,
+    .btn-host .icon,
+    .b-icon {
+      font-family: "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji", "Apple Color Emoji", "Inter", sans-serif;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+
+    <!-- Header -->
+    <header>
+      <div class="logo">
+        <div class="logo-icon">&#x1F9DF;</div>
+        <div>
+          <h1 id="main-title">Minecraft</h1>
+          <p>HOST MANAGER - SHARED SERVER SYSTEM</p>
+        </div>
+      </div>
+      <div class="header-right">
+        <div class="player-badge">
+          <strong id="h-player">&mdash;</strong>
+          Hosting from this PC
+        </div>
+        <div id="h-badge" class="badge-offline">Offline</div>
+      </div>
+    </header>
+
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="sb-head">
+          <div class="sb-title">CONTROL</div>
+          <div class="sb-sub">Smart sidebar</div>
+        </div>
+        <div class="sb-nav">
+          <button id="nav-server" class="sb-btn active" onclick="navTo('server')">&#x23FB; Server</button>
+          <button id="nav-remote-host" class="sb-btn" onclick="openRemoteHostModal()">&#x1F5A5;&#xFE0F; Host on Another PC</button>
+          <button id="nav-options" class="sb-btn" onclick="navTo('options')">&#9881;&#65039; Options</button>
+          <button id="nav-log" class="sb-btn" onclick="navTo('log')">&#x1F4C4; Log</button>
+          <button id="nav-players" class="sb-btn" onclick="navTo('players')">&#x1F465; Players</button>
+          <button id="nav-files" class="sb-btn" onclick="navTo('files')">&#x1F4C1; Files</button>
+          <button id="nav-worlds" class="sb-btn" onclick="navTo('worlds')">&#x1F30D; Worlds</button>
+          <button id="nav-backups" class="sb-btn" onclick="navTo('backups')">&#x1F4BE; Backups</button>
+          <button id="nav-access" class="sb-btn" onclick="navTo('access')">&#x1F510; Access</button>
+        </div>
+      </aside>
+
+      <div class="main-area">
+    <div class="grid">
+      <!-- LEFT COLUMN -->
+      <div class="left">
+
+        <!-- BIG BUTTON CARD -->
+        <div class="card" id="section-server">
+          <div class="card-header">
+            <div class="dot" id="server-dot"></div>
+            <span id="server-status-label">Server Status</span>
+          </div>
+          <div class="card-body">
+            <!-- New Status Panel -->
+            <div class="status-panel-grid">
+              <div class="status-item-card" onclick="openStatModal('server')">
+                <div class="status-item-icon">&#x1F7E2;</div>
+                <div class="status-item-info">
+                  <div class="status-item-label">Server</div>
+                  <div class="status-item-value" id="p-status">Offline</div>
+                </div>
+              </div>
+              <div class="status-item-card" onclick="openStatModal('host')">
+                <div class="status-item-icon" id="p-host-icon">&#x1F464;</div>
+                <div class="status-item-info">
+                  <div class="status-item-label">Host</div>
+                  <div class="status-item-value" id="p-host">None</div>
+                </div>
+              </div>
+              <div class="status-item-card" onclick="openStatModal('address')">
+                <div class="status-item-icon">&#x1F310;</div>
+                <div class="status-item-info">
+                  <div class="status-item-label">Address</div>
+                  <div class="status-item-value" id="p-addr">---</div>
+                </div>
+              </div>
+              <div class="status-item-card" onclick="openStatModal('sync')">
+                <div class="status-item-icon">&#x1F504;</div>
+                <div class="status-item-info">
+                  <div class="status-item-label">Sync</div>
+                  <div class="status-item-value" id="p-sync">Active</div>
+                </div>
+              </div>
+              <div class="status-item-card" onclick="openStatModal('uptime')">
+                <div class="status-item-icon">&#x23F1;&#65039;</div>
+                <div class="status-item-info">
+                  <div class="status-item-label">Uptime</div>
+                  <div class="status-item-value" id="p-uptime">&mdash;</div>
+                </div>
+              </div>
+              <div class="status-item-card" onclick="openPlayersModal()">
+                <div class="status-item-icon">&#x1F465;</div>
+                <div class="status-item-info">
+                  <div class="status-item-label">Players</div>
+                  <div class="status-item-value" id="p-players">0</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="quick-action-grid">
+              <button class="btn-backup" onclick="doBackup()">&#x1F4BE; Backup Now</button>
+              <button class="btn-backup" onclick="syncNow()">&#x1F504; Sync Now</button>
+              <button class="btn-backup" id="btn-download-server" onclick="downloadServerFiles()">&#x1F4E5; Download Current Server Files</button>
+            </div>
+
+            <div class="metrics-grid">
+              <div class="metric-card">
+                <div class="metric-head"><span>Server CPU</span><span class="v" id="m-cpu-v">0%</span></div>
+                <canvas class="metric-canvas" id="m-cpu-c"></canvas>
+              </div>
+              <div class="metric-card">
+                <div class="metric-head"><span>Server RAM</span><span class="v" id="m-mem-v">0%</span></div>
+                <canvas class="metric-canvas" id="m-mem-c"></canvas>
+              </div>
+              <div class="metric-card">
+                <div class="metric-head"><span>Server I/O</span><span class="v" id="m-disk-v">0%</span></div>
+                <canvas class="metric-canvas" id="m-disk-c"></canvas>
+              </div>
+            </div>
+
+            <div class="host-section" style="padding: 10px 0 30px;">
+              <div class="host-action-row">
+                <button class="btn-host disabled" id="btn-host" onclick="toggleHost()">
+                  <div class="pulse-ring"></div>
+                  <div class="icon" id="btn-icon">&#9889;</div>
+                  <div id="btn-label">LOADING</div>
+                </button>
+                <button class="btn-host-secondary" id="btn-restart-main" onclick="restartHost()" disabled title="Restart is available only when server is fully running.">
+                  &#x1F501; RESTART
+                </button>
+              </div>
+              <div class="host-status-text" id="host-status-text">
+                Loading...
+              </div>
+            </div>
+
+            <!-- Status bar -->
+            <div class="status-bar" style="margin: 0 20px 20px;">
+              <div class="status-cell">
+                <div class="label">Server</div>
+                <div class="value" id="s-running">&mdash;</div>
+              </div>
+              <div class="status-cell">
+                <div class="label">Host</div>
+                <div class="value" id="s-host">&mdash;</div>
+              </div>
+              <div class="status-cell">
+                <div class="label">Last Sync</div>
+                <div class="value val-blue" id="s-sync">&mdash;</div>
+              </div>
+              <div class="status-cell">
+                <div class="label">Syncthing</div>
+                <div class="value" id="s-syncthing">&mdash;</div>
+              </div>
+              <div class="status-cell">
+                <div class="label">Sync Pending</div>
+                <div class="value" id="s-pending">0</div>
+              </div>
+            </div>
+
+            <!-- Progress -->
+            <div class="progress-wrap" id="progress-wrap">
+              <div class="progress-msg" id="progress-msg">Working...</div>
+              <div class="progress-bar-outer">
+                <div class="progress-bar-inner" id="progress-bar"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- CONSOLE -->
+          <div class="card" id="section-console">
+            <div class="card-header">
+              <div class="dot" style="background:#39ff14"></div>
+              Server Console
+            </div>
+            <div class="card-body">
+              <div class="log-wrap" id="log-wrap">
+                <div class="log-line">Waiting for server...</div>
+              </div>
+              <div class="console-input">
+                <input type="text" id="cmd-input" placeholder="say Hello World | kick player | ..."
+                  onkeydown="if(event.key==='Enter') sendCmd()">
+                <button class="btn-send" onclick="sendCmd()">&#9654;</button>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- RIGHT COLUMN -->
+        <div class="right">
+
+          <!-- TABS -->
+          <div class="card" id="section-sidepanel" style="flex:0">
+            <div class="card-body" style="padding-bottom:8px">
+              <div class="panel-head-row">
+                <div class="side-card-title" id="utility-title" style="margin:0">OPTIONS</div>
+                <button class="panel-close" onclick="closeControlPanel()">Close</button>
+              </div>
+
+              <!-- ACCESS PANEL -->
+              <div class="tab-panel" id="t-access">
+                <div class="host-info" id="host-info">
+                  <div class="host-row"><span class="k">Current Host</span><span class="v" id="hi-host">None</span>
+                  </div>
+                  <div class="host-row"><span class="k">Host IP</span><span class="v" id="hi-ip">&mdash;</span></div>
+                  <div class="host-row"><span class="k">Host UI URL</span><span class="v val-blue" id="hi-ui" style="cursor:pointer" onclick="copyText(this.textContent)">&mdash;</span></div>
+                  <div class="host-row"><span class="k">Hosting Since</span><span class="v" id="hi-time">&mdash;</span></div>
+                  <div class="host-row"><span class="k">Server Uptime</span><span class="v" id="hi-uptime">&mdash;</span></div>
+                  <div class="host-row"><span class="k">Server RAM</span><span class="v" id="hi-ramuse">&mdash;</span></div>
+                  <div class="host-row"><span class="k">Server PID</span><span class="v" id="hi-pid">&mdash;</span></div>
+                  <div class="host-row"><span class="k">Your IP</span><span class="v val-blue" id="hi-myip">&mdash;</span>
+                  </div>
+                  <div class="host-row"><span class="k">World Folder (active)</span><span class="v" id="hi-world-dir" style="font-size:10px; overflow:hidden; text-overflow:ellipsis">&mdash;</span></div>
+                  <div class="host-row" title="Permanent address for friends"><span class="k">Playit Addr</span><span
+                      class="v val-blue" id="hi-tunnel">Not Active</span></div>
+                  <div class="host-row" title="Share this ID with friends to sync worlds"><span class="k">Syncthing
+                      ID</span><span class="v" id="hi-stid"
+                      style="font-size:9px; overflow:hidden; text-overflow:ellipsis; cursor:pointer"
+                      onclick="copyText(this.textContent)">Loading...</span></div>
+                </div>
+                <button class="adv-toggle" onclick="toggleAccessAdvanced()">Advanced / Emergency Controls</button>
+                <div class="form-row" style="margin-top:12px;">
+                  <label>World Folder Override (optional)</label>
+                  <div style="display:flex; gap:6px">
+                    <input id="a-world-path" style="flex:1" placeholder="/path/to/world_latest or world" />
+                    <button class="btn-send" style="padding:0 10px" onclick="saveWorldPath()">Save</button>
+                  </div>
+                </div>
+                <div class="form-row" style="margin-top:8px;">
+                  <label>Manual Server Folder (optional)</label>
+                  <input id="a-server-manual" placeholder="/path/to/server" />
+                </div>
+                <div class="form-row" style="margin-top:8px;">
+                  <label>Manual Shared/World Folder (optional)</label>
+                  <input id="a-shared-manual" placeholder="/path/to/shared or world_latest" />
+                </div>
+                <div class="form-row" style="margin-top:8px;">
+                  <label>Manual Backups Folder (optional)</label>
+                  <input id="a-backups-manual" placeholder="/path/to/backups" />
+                </div>
+                <div class="form-row" style="margin-top:8px;">
+                  <label>Manual Crash Reports Folder (optional)</label>
+                  <input id="a-crash-manual" placeholder="/path/to/crash-reports" />
+                </div>
+                <button class="btn-backup" onclick="saveManualPaths()" style="margin-top:8px">
+                  &#x1F4BE; Save Manual Paths (Optional)
+                </button>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px;">
+                  <button class="btn-backup" onclick="autoFixSetup()">&#9881;&#65039; Auto Fix</button>
+                  <button class="btn-backup" onclick="pollDiagnostics()">&#128270; Run Diagnostics</button>
+                </div>
+                <div class="issues-list" id="diag-list" style="margin-top:10px;max-height:180px;">
+                  <div class="issue-row">Diagnostics not run yet.</div>
+                </div>
+                <div class="adv-wrap" id="access-advanced">
+                  <button class="btn-force" onclick="forceClear()" style="margin-top:12px">
+                    &#x1F6A8; Force Clear Lock (emergency)
+                  </button>
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;">
+                    <button class="btn-backup" onclick="restartHost()">&#x1F501; Restart</button>
+                    <button class="btn-force" onclick="killHost()">&#x1F6D1; Kill</button>
+                  </div>
+                </div>
+                <div class="host-info" style="margin-top:12px">
+                  <div class="host-row"><span class="k">Last Finalize</span><span class="v" id="hi-fin">&mdash;</span></div>
+                  <div class="host-row"><span class="k">Last Recovery</span><span class="v" id="hi-rec">&mdash;</span></div>
+                  <div class="host-row"><span class="k">Last Backup</span><span class="v" id="hi-bkp">&mdash;</span></div>
+                  <div class="host-row"><span class="k">Last Error</span><span class="v" id="hi-err">&mdash;</span></div>
+                </div>
+              </div>
+
+              <!-- LOG PANEL -->
+              <div class="tab-panel" id="t-log">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
+                  <button class="btn-backup" onclick="pollLogDetails()">&#x1F504; Refresh Log Analysis</button>
+                  <button class="btn-backup" onclick="openFolder('crash-reports')">&#x1F4A5; Open Crash Reports</button>
+                </div>
+                <div class="log-dash">
+                  <div class="log-pill"><div class="k">Errors</div><div class="v val-red" id="lg-err">0</div></div>
+                  <div class="log-pill"><div class="k">Warnings</div><div class="v val-yellow" id="lg-warn">0</div></div>
+                  <div class="log-pill"><div class="k">Crash Reports</div><div class="v val-blue" id="lg-crash">0</div></div>
+                </div>
+                <div class="side-card-title" style="margin-top:8px">Detected Issues</div>
+                <div class="issues-list" id="log-issues">
+                  <div class="issue-row">No issues captured yet.</div>
+                </div>
+                <div class="side-card-title" style="margin-top:10px">Recent Server Log</div>
+                <div class="log-wrap" id="log-wrap-history">
+                  <div class="log-line">Waiting for server logs...</div>
+                </div>
+                <div class="side-card-title" style="margin-top:10px">Crash Reports</div>
+                <div class="issues-list" id="log-crashes">
+                  <div class="issue-row">No crash reports detected.</div>
+                </div>
+              </div>
+
+              <!-- OPTIONS PANEL -->
+              <div class="tab-panel active" id="t-options">
+                <div class="form-row">
+                  <label>User Name</label>
+                  <input id="s-name" placeholder="Rahul" />
+                </div>
+                <div class="form-row">
+                  <label>Theme</label>
+                  <select id="s-theme" onchange="setThemePreference(this.value)"
+                    style="background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 9px 12px; border-radius: 7px; font-size: 13px;">
+                    <option value="dark">Dark (Default)</option>
+                    <option value="light">Light</option>
+                    <option value="system">System</option>
+                  </select>
+                </div>
+                <div class="form-row">
+                  <label>Project Key (Auto)</label>
+                  <div style="display:flex; gap:5px">
+                    <input id="s-project-key" style="flex:1" readonly placeholder="auto-generated" />
+                    <button class="btn-send" style="padding:0 8px" onclick="copyText(document.getElementById('s-project-key').value || '')">&#x1F4CB;</button>
+                  </div>
+                </div>
+                <button class="btn-backup" onclick="quickstartSetup()" style="margin-bottom:12px">
+                  &#x1F680; One-Click Setup / Quickstart
+                </button>
+                <button class="btn-backup" onclick="openSetupWizard()" style="margin-bottom:12px">
+                  &#9881;&#65039; Open Setup Wizard
+                </button>
+                <div class="form-row">
+                  <label>Server Folder</label>
+                  <div style="display:flex; gap:5px">
+                    <input id="s-server" style="flex:1" placeholder="/home/shivam/server" />
+                    <button class="btn-send" style="padding:0 8px" onclick="openTypedFolder('s-server')">&#x1F4C1;</button>
+                  </div>
+                </div>
+                <button class="btn-backup" id="btn-open-server-files" onclick="openFolder('server')" style="margin-bottom:12px">
+                  &#x1F9F0; Open Server Files
+                </button>
+                <div class="form-row">
+                  <label>Java RAM</label>
+                  <div class="ram-row">
+                    <select id="s-ram-select" onchange="toggleRamCustom('s')">
+                      <option value="2G">2 GB</option>
+                      <option value="4G" selected>4 GB</option>
+                      <option value="6G">6 GB</option>
+                      <option value="8G">8 GB</option>
+                      <option value="custom">Custom (MiB)</option>
+                    </select>
+                    <div class="ram-custom-wrap" id="s-ram-custom-wrap">
+                      <input id="s-ram-custom" type="number" min="512" step="256" placeholder="4096" />
+                    </div>
+                  </div>
+                  <div class="ram-help">Custom value MiB me dalo, e.g. `6144` = `6G`.</div>
+                </div>
+                <div class="form-row">
+                  <label>Max Players</label>
+                  <input id="s-max-players" type="number" min="1" max="500" placeholder="20" />
+                </div>
+                <div class="form-row">
+                  <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                    <input id="s-whitelist" type="checkbox" />
+                    <span>Enable Whitelist</span>
+                  </label>
+                </div>
+                <div class="form-row">
+                  <label>Shared Folder (Syncthing)</label>
+                  <div style="display:flex; gap:5px">
+                    <input id="s-shared" style="flex:1" placeholder="/home/shivam/mc-shared" />
+                    <button class="btn-send" style="padding:0 8px" onclick="openTypedFolder('s-shared')">&#x1F4C1;</button>
+                  </div>
+                </div>
+                <div class="form-row">
+                  <label>Server JAR / run.sh</label>
+                  <input id="s-jar" placeholder="server.jar" />
+                </div>
+                <button class="btn-save" onclick="saveSettings()">Save Settings</button>
+              </div>
+
+              <!-- PLAYERS PANEL -->
+              <div class="tab-panel" id="t-players">
+                <button class="btn-backup" onclick="refreshPlayers()" style="margin-bottom:12px">&#x1F504; Refresh Players</button>
+                <div class="form-row">
+                  <label>Selected Player</label>
+                  <input id="p-selected" placeholder="username" />
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                  <button class="btn-backup" onclick="playerAction('op')">&#11088; OP</button>
+                  <button class="btn-backup" onclick="playerAction('deop')">&#11015;&#65039; DEOP</button>
+                  <button class="btn-backup" onclick="playerAction('wl_add')">&#9989; WL Add</button>
+                  <button class="btn-backup" onclick="playerAction('wl_remove')">&#10060; WL Remove</button>
+                  <button class="btn-force" onclick="playerAction('kick')">&#x1F462; Kick</button>
+                  <button class="btn-force" onclick="playerAction('ban')">&#x26D4; Ban</button>
+                </div>
+                <button class="btn-backup" onclick="playerAction('pardon')" style="margin-top:8px">&#x1F7E2; Pardon</button>
+                <div class="host-info" style="margin-top:12px;">
+                  <div class="host-row"><span class="k">Online</span><span class="v" id="pl-online">0</span></div>
+                  <div class="host-row"><span class="k">Max Players</span><span class="v" id="pl-max">&mdash;</span></div>
+                  <div class="host-row"><span class="k">Whitelist</span><span class="v" id="pl-wl">&mdash;</span></div>
+                  <div class="host-row"><span class="k">Players</span><span class="v" id="pl-names">&mdash;</span></div>
+                </div>
+              </div>
+
+              <!-- FILES PANEL -->
+              <div class="tab-panel" id="t-files">
+                <button class="btn-backup" id="btn-open-server-files-2" onclick="openFolder('server')" style="margin-bottom:12px">
+                  &#x1F4C1; Open Server Files
+                </button>
+                <button class="btn-backup" onclick="openFolder('shared-world')" style="margin-bottom:12px">
+                  &#x1F30D; Open Shared World Folder
+                </button>
+                <button class="btn-backup" onclick="openFolder('backups')" style="margin-bottom:12px">
+                  &#x1F5C2; Open Backups Folder
+                </button>
+                <button class="btn-backup" id="btn-download-server-2" onclick="downloadServerFiles()">
+                  &#x1F4E5; Download Current Server Files
+                </button>
+              </div>
+
+              <!-- WORLDS PANEL -->
+              <div class="tab-panel" id="t-worlds">
+                <button class="btn-backup" onclick="syncNow()" style="margin-bottom:12px">
+                  &#x1F504; Sync World Now
+                </button>
+                <button class="btn-backup" onclick="doBackup()" style="margin-bottom:12px">
+                  &#x1F4BE; Backup Current World
+                </button>
+                <button class="btn-backup" onclick="openFolder('world_latest')" style="margin-bottom:12px">
+                  &#x1F30D; Open world_latest
+                </button>
+                <div class="host-info" style="margin-top:12px;">
+                  <div class="host-row"><span class="k">Server State</span><span class="v" id="wd-state">&mdash;</span></div>
+                  <div class="host-row"><span class="k">Last Sync</span><span class="v" id="wd-last-sync">&mdash;</span></div>
+                  <div class="host-row"><span class="k">Pending Files</span><span class="v" id="wd-pending">0</span></div>
+                </div>
+              </div>
+
+              <!-- BACKUPS TAB -->
+              <div class="tab-panel" id="t-backups">
+                <button class="btn-backup" onclick="syncNow()" style="margin-bottom:12px">
+                  &#x1F504; Sync Now
+                </button>
+                <button class="btn-backup" onclick="doBackup()" style="margin-bottom:12px">
+                  &#x1F4BE; Backup Now
+                </button>
+                <button class="btn-backup" onclick="openFolder('backups')" style="margin-bottom:12px">
+                  &#x1F4C1; Open Backup Folder
+                </button>
+                <div class="backup-list" id="backup-list">
+                  <div class="no-backups">No backups yet.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+      </div>
+    </div>
+
+    <!-- Toast -->
+    <div id="toast"> </div>
+    <div id="sidepanel-overlay" onclick="closeControlPanel()"></div>
+
+    <div class="players-modal" id="players-modal" onclick="if(event.target.id==='players-modal') closePlayersModal()">
+      <div class="players-card">
+        <div class="players-head">
+          <span>Players Live Data</span>
+          <button class="players-close" onclick="closePlayersModal()">Close</button>
+        </div>
+        <div class="players-intro">
+          <div class="players-summary" id="players-summary">Live view updates every ~1.2s while dashboard is open.</div>
+        </div>
+        <div class="players-body" id="players-modal-body"></div>
+      </div>
+    </div>
+
+    <div class="stat-modal" id="stat-modal" onclick="if(event.target.id==='stat-modal') closeStatModal()">
+      <div class="stat-card">
+        <div class="stat-head">
+          <span id="stat-title">Details</span>
+          <button class="stat-close" onclick="closeStatModal()">Close</button>
+        </div>
+        <div class="stat-body">
+          <div class="stat-main" id="stat-main">&mdash;</div>
+          <div class="stat-sub" id="stat-sub">Live status detail.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="remote-modal" id="remote-modal" onclick="if(event.target.id==='remote-modal') closeRemoteHostModal()">
+      <div class="remote-card">
+        <div class="remote-head">
+          <span>Host on Another PC</span>
+          <button class="stat-close" onclick="closeRemoteHostModal()">Close</button>
+        </div>
+        <div class="remote-body" id="remote-modal-body">
+          <div class="issue-row">Loading active PCs...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Setup Wizard Overlay -->
+    <div id="wizard-overlay">
+      <div class="wizard-card">
+        <div class="wizard-header">
+          <h2 id="wiz-title">Setup Wizard</h2>
+          <p style="font-size: 11px; color: var(--muted); letter-spacing: 1px; margin-top: 5px;">GETTING YOU READY TO
+            HOST</p>
+        </div>
+
+        <div class="wizard-body">
+          <!-- Step 1: User Identity -->
+          <div class="wizard-step active" id="wiz-1">
+            <div class="form-row" style="margin-bottom: 15px;">
+              <label>Your Identity</label>
+              <input id="w-name" placeholder="Enter your name (e.g., Rahul)" oninput="checkWiz()" />
+            </div>
+            <div class="form-row">
+              <label>Project Name</label>
+              <input id="w-project" placeholder="e.g., Cave Horror, Survival, etc." oninput="checkWiz()" />
+            </div>
+          </div>
+
+          <!-- Step 2: Server Folder -->
+          <div class="wizard-step" id="wiz-2">
+            <label class="status-item-label">Minecraft Server Folder</label>
+            <div style="font-size: 11px; color: var(--muted); margin-bottom: 8px;" id="w-cur-path">/home/shivam</div>
+            <div class="form-row" style="margin-bottom: 10px;">
+              <input id="w-server-input" placeholder="Or paste full path here..."
+                oninput="validateWizFolder(this.value)" />
+            </div>
+            <div class="dir-list" id="w-dir-list"></div>
+            <div style="margin-top: 10px;" id="w-val-msg"></div>
+          </div>
+
+          <!-- Step 3: Shared Folder -->
+          <div class="wizard-step" id="wiz-3">
+            <label class="status-item-label">Shared World Folder (Syncthing)</label>
+            <p style="font-size: 11px; color: var(--muted); margin-bottom: 8px;">Paste path or browse below where your
+              world is synced.<br>
+              <strong style="color:var(--yellow);"> After picking the folder you will need to switch to the Syncthing web UI and accept/trust the new folder/device when prompted. This happens only once.</strong>
+            </p>
+            <div class="form-row" style="margin-bottom: 10px;">
+              <input id="w-shared-input" placeholder="Or paste full path here..."
+                oninput="wizData.shared_dir = this.value; checkWiz();" />
+            </div>
+            <div class="dir-list" id="w-shared-list"></div>
+          </div>
+
+          <!-- Step 4: Hardware -->
+          <div class="wizard-step" id="wiz-4">
+            <div class="form-row">
+              <label>RAM Allocation</label>
+              <div class="ram-row">
+                    <select id="w-ram-select" onchange="toggleRamCustom('w'); checkWiz();">
+                  <option value="2G">2 GB</option>
+                  <option value="4G" selected>4 GB (Recommended)</option>
+                  <option value="6G">6 GB</option>
+                  <option value="8G">8 GB</option>
+                  <option value="custom">Custom (MiB)</option>
+                </select>
+                <div class="ram-custom-wrap" id="w-ram-custom-wrap">
+                  <input id="w-ram-custom" type="number" min="512" step="256" placeholder="4096" oninput="checkWiz()" />
+                </div>
+              </div>
+              <div class="ram-help">Custom value MiB me dalo, e.g. `8192` = `8G`.</div>
+            </div>
+            <div style="margin-top: 20px;">
+              <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                <input type="checkbox" id="w-tunnel" checked>
+                <span>Enable Public Tunnel (playit.gg)</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Step 5: Final -->
+          <div class="wizard-step" id="wiz-5" style="text-align: center;">
+            <div style="font-size: 60px; margin-bottom: 20px;">&#9989;</div>
+            <h3>Setup Complete!</h3>
+            <p style="color: var(--muted); margin-top: 10px;">Everything is ready. You can now start hosting your
+              server.</p>
+          </div>
+        </div>
+
+        <div class="wizard-footer">
+          <button class="btn-wizard btn-prev" id="btn-wiz-prev" onclick="moveWiz(-1)">Back</button>
+          <button class="btn-wizard btn-prev" id="btn-wiz-autofix" onclick="autoFixSetup()" style="opacity:.9">Auto Fix</button>
+          <button class="btn-wizard btn-next" id="btn-wiz-next" onclick="moveWiz(1)">Next</button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // Wizard Logic (Rebuilt for Reliability)
+      let wizStep = 1;
+      let wizData = { user: '', project_name: 'Minecraft Server', server_dir: '', shared_dir: '', ram: '4G', tunnel: true, server_jar: 'server.jar' };
+      let curBrowsePath = '';
+      let suggestServer = '';
+
+      function normalizeRamInput(raw) {
+        let v = String(raw || '').trim().toUpperCase();
+        if (!v) return '4G';
+        if (v.endsWith('GB')) v = v.slice(0, -2) + 'G';
+        if (v.endsWith('MB')) v = v.slice(0, -2) + 'M';
+        if (v.endsWith('G') || v.endsWith('M') || /^\d+$/.test(v)) return v;
+        return '4G';
+      }
+
+      function ramToMiB(raw) {
+        const v = normalizeRamInput(raw);
+        if (v.endsWith('G')) return Math.max(1, Math.round(parseFloat(v) * 1024));
+        if (v.endsWith('M')) return Math.max(1, Math.round(parseFloat(v)));
+        if (/^\d+$/.test(v)) return Math.max(1, parseInt(v, 10));
+        return 4096;
+      }
+
+      function toggleRamCustom(prefix) {
+        const sel = document.getElementById(`${prefix}-ram-select`);
+        const wrap = document.getElementById(`${prefix}-ram-custom-wrap`);
+        if (!sel || !wrap) return;
+        wrap.style.display = (sel.value === 'custom') ? 'block' : 'none';
+      }
+
+      function setRamControls(prefix, raw) {
+        const sel = document.getElementById(`${prefix}-ram-select`);
+        const custom = document.getElementById(`${prefix}-ram-custom`);
+        if (!sel) return;
+        const v = normalizeRamInput(raw);
+        if (['2G', '4G', '6G', '8G'].includes(v)) {
+          sel.value = v;
+          if (custom) custom.value = '';
+        } else {
+          sel.value = 'custom';
+          if (custom) custom.value = String(ramToMiB(v));
+        }
+        toggleRamCustom(prefix);
+      }
+
+      function getRamFromControls(prefix, showError = true) {
+        const sel = document.getElementById(`${prefix}-ram-select`);
+        if (!sel) return '4G';
+        if (sel.value !== 'custom') return sel.value;
+        const custom = document.getElementById(`${prefix}-ram-custom`);
+        const mib = parseInt((custom && custom.value) ? custom.value : '', 10);
+        if (!Number.isFinite(mib) || mib < 512 || mib > 65536) {
+          if (showError) toast('Custom RAM MiB must be between 512 and 65536.', true);
+          return '';
+        }
+        return `${mib}M`;
+      }
+
+      function showWizard() {
+        wizStep = 1;
+        document.getElementById('wizard-overlay').style.display = 'flex';
+        renderWizStep();
+        // if the backend provided a suggested server path (e.g. current cwd contains a jar), prefill
+        if (suggestServer && !document.getElementById('w-server-input').value) {
+          document.getElementById('w-server-input').value = suggestServer;
+          validateWizFolder(suggestServer);
+        }
+      }
+
+      function openSetupWizard() {
+        showWizard();
+      }
+      function moveWiz(delta) {
+        // Capture data from current inputs before moving
+        if (wizStep === 1) {
+          wizData.user = document.getElementById('w-name').value;
+          wizData.project_name = document.getElementById('w-project').value || "Minecraft Server";
+        }
+        if (wizStep === 2) wizData.server_dir = document.getElementById('w-server-input').value;
+        if (wizStep === 3) wizData.shared_dir = document.getElementById('w-shared-input').value;
+
+        if (wizStep === 5 && delta > 0) {
+          saveSettingsFinal();
+          return;
+        }
+
+        const nextStep = wizStep + delta;
+        if (nextStep >= 1 && nextStep <= 5) {
+          wizStep = nextStep;
+          renderWizStep();
+        }
+      }
+
+      function renderWizStep() {
+        document.querySelectorAll('.wizard-step').forEach(s => s.classList.remove('active'));
+        const stepEl = document.getElementById('wiz-' + wizStep);
+        if (stepEl) stepEl.classList.add('active');
+
+        document.getElementById('btn-wiz-prev').style.visibility = wizStep === 1 ? 'hidden' : 'visible';
+        document.getElementById('btn-wiz-next').textContent = wizStep === 5 ? 'Finish' : 'Next';
+
+        const titles = ["User Identity", "Minecraft Server", "Shared Sync", "Hardware", "Done"];
+        document.getElementById('wiz-title').textContent = titles[wizStep - 1] || "Setup";
+
+        // Step specific setup
+        if (wizStep === 2) {
+          const sInp = document.getElementById('w-server-input');
+          if (sInp.value) validateWizFolder(sInp.value);
+          else browseDirs(wizData.server_dir || '');
+        }
+        if (wizStep === 3) {
+          const shInp = document.getElementById('w-shared-input');
+          if (!shInp.value) browseDirs(wizData.shared_dir || '', true);
+        }
+        if (wizStep === 4) {
+          setRamControls('w', wizData.ram || '4G');
+        }
+
+        checkWiz();
+      }
+
+      async function browseDirs(path, isShared = false) {
+        try {
+          const r = await fetch('/setup/list-dirs?path=' + encodeURIComponent(path));
+          const d = await r.json();
+          const wrap = document.getElementById(isShared ? 'w-shared-list' : 'w-dir-list');
+          if (!wrap) return;
+
+          curBrowsePath = d.current;
+          document.getElementById('w-cur-path').textContent = d.current;
+          wrap.innerHTML = '';
+
+          if (d.error) {
+            wrap.innerHTML = `<div class="dir-item" style="opacity:.8;cursor:default">\u274C ${d.error}</div>`;
+          } else if (!d.items || d.items.length === 0) {
+            wrap.innerHTML = `<div class="dir-item" style="opacity:.8;cursor:default">No subfolders here</div>`;
+          } else {
+            d.items.forEach(i => {
+              const row = document.createElement('div');
+              row.className = 'dir-item';
+              const icon = i.name === '..' ? '\u2934\uFE0F' : '\uD83D\uDCC1';
+              row.textContent = `${icon} ${i.name}`;
+              row.addEventListener('click', () => browseDirs(i.path, isShared));
+              wrap.appendChild(row);
+            });
+          }
+
+          const inputId = isShared ? 'w-shared-input' : 'w-server-input';
+          const inputEl = document.getElementById(inputId);
+          if (inputEl) inputEl.value = d.current;
+
+          if (!isShared) validateWizFolder(d.current);
+          else { wizData.shared_dir = d.current; checkWiz(); }
+        } catch (e) {
+          console.error("Browse Error:", e);
+        }
+      }
+
+      async function validateWizFolder(path) {
+        if (!path) {
+          wizData.server_dir = '';
+          document.getElementById('w-val-msg').textContent = '';
+          checkWiz();
+          return;
+        }
+
+        try {
+          const r = await fetch('/setup/validate', { method: 'POST', body: JSON.stringify({ path }), headers: { 'Content-Type': 'application/json' } });
+          const d = await r.json();
+          const msg = document.getElementById('w-val-msg');
+          if (!msg) return;
+
+          if (d.ok) {
+            wizData.server_dir = path;
+            if (d.has_jar) {
+              msg.innerHTML = `<span style="color:var(--green)">\u2705 Valid Server (${d.jars[0]})</span>`;
+              wizData.server_jar = d.jars[0];
+            } else {
+              msg.innerHTML = `<span style="color:var(--yellow)">\u26A0\uFE0F Folder exists, but no JAR found. Ensure you add your server files later.</span>`;
+              wizData.server_jar = 'server.jar';
+            }
+          } else {
+            msg.innerHTML = `<span style="color:var(--accent2)">\u274C ${d.msg}</span>`;
+            wizData.server_dir = path; // Allow proceed if user says so? No, let's stick to d.ok
+          }
+        } catch (e) {
+          wizData.server_dir = path; // Fallback to accept whatever is in input if backend fails
+        }
+        checkWiz();
+      }
+
+      function checkWiz() {
+        let ok = false;
+        if (wizStep === 1) ok = document.getElementById('w-name').value.trim().length > 1;
+        if (wizStep === 2) ok = document.getElementById('w-server-input').value.trim().length > 2;
+        if (wizStep === 3) ok = document.getElementById('w-shared-input').value.trim().length > 2;
+        if (wizStep === 4) ok = !!getRamFromControls('w', false);
+        if (wizStep === 5) ok = true;
+
+        const nextBtn = document.getElementById('btn-wiz-next');
+        if (nextBtn) nextBtn.disabled = !ok;
+      }
+
+      async function saveSettingsFinal() {
+        const btn = document.getElementById('btn-wiz-next');
+        const oldText = btn.textContent;
+        btn.textContent = "Saving...";
+        btn.disabled = true;
+
+        try {
+          // Capture hardware settings from Step 4
+          const wizRam = getRamFromControls('w');
+          if (!wizRam) throw new Error("Invalid RAM value.");
+          wizData.ram = wizRam;
+          wizData.tunnel = document.getElementById('w-tunnel').checked;
+
+          // 1. Save core configuration
+          const r = await fetch('/config/save', {
+            method: 'POST',
+            body: JSON.stringify({ ...wizData, wizard_completed: true }),
+            headers: { 'Content-Type': 'application/json' }
+          });
+          const d = await r.json();
+
+          if (!d.ok) throw new Error(d.msg || "Save failed");
+          if (d.warn) toast(d.warn, true);
+
+          // 2. Ensure sync folder exists and syncthing is reachable
+          const syncResp = await fetch('/setup/ensure-sync', {
+            method: 'POST',
+            body: JSON.stringify({ shared_dir: wizData.shared_dir }),
+            headers: { 'Content-Type': 'application/json' }
+          });
+          const syncData = await syncResp.json();
+          if (!syncData.ok) throw new Error(syncData.msg || "Sync setup failed.");
+          if (syncData.degraded) toast(syncData.msg || "Setup saved in degraded mode. Finish Syncthing pairing later.", true);
+          else if (syncData.msg) toast(syncData.msg);
+
+          // 3. Close wizard on success
+          document.getElementById('wizard-overlay').style.display = 'none';
+          toast(syncData && syncData.degraded ? "Setup saved. Sync pending." : "Setup Complete!");
+
+          // Force immediate status update
+          pollStatus();
+
+        } catch (e) {
+          console.error("Setup Finalize Error:", e);
+          toast("Error: " + e.message, true);
+        } finally {
+          btn.textContent = oldText;
+          btn.disabled = false;
+        }
+      }
+
+      async function autoFixSetup(showOkToast = true) {
+        const btn = document.getElementById('btn-wiz-autofix');
+        const oldText = btn ? btn.textContent : '';
+        if (btn) {
+          btn.disabled = true;
+          btn.textContent = 'Fixing...';
+        }
+        try {
+          const sharedFromInput = (document.getElementById('w-shared-input')?.value || '').trim();
+          const r = await fetch('/setup/auto-fix', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ shared_dir: sharedFromInput || wizData.shared_dir || '' })
+          });
+          const d = await r.json();
+          if (!d.ok) {
+            // Even when backend marks partial-not-ok, keep applying returned fields.
+            if (!(d.server_dir || d.shared_dir || d.project_key || d.warn || d.actions)) {
+              toast(d.msg || 'Auto-fix failed', true);
+              return false;
+            }
+          }
+          if (d.server_dir) {
+            wizData.server_dir = d.server_dir;
+            const srv = document.getElementById('w-server-input');
+            if (srv && !srv.matches(':focus')) srv.value = d.server_dir;
+          }
+          if (d.shared_dir) {
+            wizData.shared_dir = d.shared_dir;
+            const sh = document.getElementById('w-shared-input');
+            if (sh && !sh.matches(':focus')) sh.value = d.shared_dir;
+          }
+          if (d.project_key) {
+            const pk = document.getElementById('s-project-key');
+            if (pk) pk.value = d.project_key;
+          }
+          const failCnt = Number((d.diag_counts && d.diag_counts.fail) || 0);
+          const warnCnt = Number((d.diag_counts && d.diag_counts.warn) || 0);
+          const actions = Array.isArray(d.actions) ? d.actions : [];
+          if (actions.length) {
+            const preview = actions.slice(0, 2).join(' | ');
+            toast(`Auto-fix: ${actions.length} repairs applied. ${preview}`);
+          }
+          if (d.warn) {
+            toast(d.warn, true);
+          } else if (showOkToast) {
+            const base = d.msg || 'Auto-fix applied';
+            toast(failCnt > 0 ? `${base} (${failCnt} critical left)` : `${base} (${warnCnt} warn)`, failCnt > 0);
+          }
+          if (failCnt > 0 || warnCnt > 0) {
+            pollDiagnostics();
+          }
+
+          if (d.setup_ok) {
+            document.getElementById('wizard-overlay').style.display = 'none';
+            pollStatus();
+          } else {
+            checkWiz();
+          }
+          return true;
+        } catch (e) {
+          toast('Auto-fix failed', true);
+          return false;
+        } finally {
+          if (btn) {
+            btn.disabled = false;
+            btn.textContent = oldText || 'Auto Fix';
+          }
+        }
+      }
+
+      // "" Main Controller Logic ""
+      let serverRunning = false;
+      let taskPending = false;
+      let lockData = null;
+      let myName = '';
+      let setupOk = false;
+      let serverState = 'offline';
+      let latestPlayersInfo = {};
+      let latestPlayersOnline = [];
+      let latestStatusSnapshot = {};
+      let latestRemoteNodes = [];
+      let localNodeId = '';
+      let currentNavKey = 'server';
+      let remotePrevNavKey = 'server';
+      let metricHist = { cpu: [], mem: [], disk: [] };
+      let themePref = 'dark';
+      let autoRedirectDone = false;
+      let mismatchWarned = false;
+      let setupWarned = false;
+      let autoSetupTried = false;
+      let mediaTheme = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+      let pollInterval, logInterval, logDetailsInterval, taskInterval;
+      let statusReqInFlight = false;
+      let logsReqInFlight = false;
+      let logDetailsReqInFlight = false;
+      let taskReqInFlight = false;
+      let diagReqInFlight = false;
+
+      async function apiFetchJson(url, opts = {}, timeoutMs = 4500) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+          const req = Object.assign({ cache: 'no-store' }, opts || {});
+          req.signal = controller.signal;
+          req.headers = Object.assign({}, (opts && opts.headers) ? opts.headers : {});
+          const r = await fetch(url, req);
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return await r.json();
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+
+      function isLogPanelOpen() {
+        const side = document.getElementById('section-sidepanel');
+        if (!side || !side.classList.contains('modal-open')) return false;
+        return currentNavKey === 'log';
+      }
+
+      function shouldPollLogs() {
+        if (document.hidden && !taskPending) return false;
+        return isLogPanelOpen() || serverRunning || taskPending;
+      }
+
+      function shouldPollLogDetails() {
+        if (document.hidden) return false;
+        return isLogPanelOpen() || (serverRunning && currentNavKey === 'log');
+      }
+
+      window.onload = () => {
+        initTheme();
+        setRamControls('s', '4G');
+        setRamControls('w', '4G');
+        setNavActive('server');
+        closeControlPanel();
+        pollStatus();
+        pollLogDetails();
+        pollInterval = setInterval(pollStatus, 1600);
+        logInterval = setInterval(pollLogs, 2600);
+        logDetailsInterval = setInterval(pollLogDetails, 12000);
+        window.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape') closeControlPanel();
+        });
+      };
+
+      async function pollStatus() {
+        if (document.hidden && !taskPending) return;
+        if (statusReqInFlight) return;
+        statusReqInFlight = true;
+        try {
+          const d = await apiFetchJson('/status', {}, 4200);
+          applyStatus(d);
+        } catch (e) {
+          setBtn('disabled', '\u26A0\uFE0F', 'NO CONNECTION', 'Backend offline.');
+        } finally {
+          statusReqInFlight = false;
+        }
+      }
+
+      async function pollLogs() {
+        if (!shouldPollLogs()) return;
+        if (logsReqInFlight) return;
+        logsReqInFlight = true;
+        try {
+          const d = await apiFetchJson('/logs', {}, 3800);
+          renderLogs(d.logs);
+        } catch (e) { }
+        finally { logsReqInFlight = false; }
+      }
+
+      async function pollLogDetails() {
+        if (!shouldPollLogDetails()) return;
+        if (logDetailsReqInFlight) return;
+        logDetailsReqInFlight = true;
+        try {
+          const d = await apiFetchJson('/logs/details', {}, 5000);
+          renderLogDetails(d);
+        } catch (e) { }
+        finally { logDetailsReqInFlight = false; }
+      }
+
+      async function pollTask() {
+        if (taskReqInFlight) return;
+        taskReqInFlight = true;
+        try {
+          const d = await apiFetchJson('/task', {}, 3000);
+          if (d.running) {
+              showProgress(d.pct, d.msg);
+          } else {
+            if (taskInterval) clearInterval(taskInterval);
+            taskPending = false;
+            hideProgress();
+            if (d.error) toast(d.error, true);
+            pollStatus();
+          }
+        } catch (e) { }
+        finally { taskReqInFlight = false; }
+      }
+
+      async function pollDiagnostics() {
+        if (diagReqInFlight) return;
+        diagReqInFlight = true;
+        try {
+          const d = await apiFetchJson('/diagnostics', {}, 5500);
+          const wrap = document.getElementById('diag-list');
+          if (!wrap) return;
+          const items = Array.isArray(d.items) ? d.items : [];
+          if (!items.length) {
+            wrap.innerHTML = '<div class="issue-row">No diagnostics available.</div>';
+            return;
+          }
+          const badge = (s) => {
+            if (s === 'pass') return '<span class="issue-meta val-green">PASS</span>';
+            if (s === 'fail') return '<span class="issue-meta val-red">FAIL</span>';
+            return '<span class="issue-meta val-yellow">WARN</span>';
+          };
+          wrap.innerHTML = items.map(it => `
+            <div class="issue-row ${it.status === 'fail' ? 'err' : (it.status === 'warn' ? 'warn' : '')}">
+              ${badge(it.status)} <span class="issue-meta">${escHtml(it.name || 'Check')}</span>
+              <div style="margin-top:4px">${escHtml(it.detail || '')}</div>
+              ${it.fix ? `<div style="margin-top:4px;color:var(--muted)">${escHtml(it.fix)}</div>` : ''}
+            </div>
+          `).join('');
+          if (d.counts && (d.counts.fail || d.counts.warn)) {
+            toast(`Diagnostics: ${d.counts.fail || 0} fail, ${d.counts.warn || 0} warn`, !!d.counts.fail);
+          }
+        } catch (e) {
+          const wrap = document.getElementById('diag-list');
+          if (wrap) wrap.innerHTML = '<div class="issue-row err">Failed to load diagnostics.</div>';
+        } finally {
+          diagReqInFlight = false;
+        }
+      }
+
+      function applyStatus(d) {
+        latestStatusSnapshot = d || {};
+        if (d.project_name) {
+          document.title = `${d.project_name} - Host Manager`;
+          document.getElementById('main-title').textContent = d.project_name;
+        }
+        myName = d.user || '?';
+        serverRunning = d.running;
+        serverState = d.server_state || (d.running ? 'running' : 'offline');
+        lockData = d.lock;
+        setupOk = d.setup_ok;
+        localNodeId = d.local_node_id || '';
+        latestRemoteNodes = Array.isArray(d.remote_nodes) ? d.remote_nodes : [];
+
+        if (!autoRedirectDone) {
+          const hint = (d.connect_hint_url || '').trim();
+          if (hint) {
+            autoRedirectDone = true;
+            toast(`Active host detected: ${hint}`, false);
+          }
+        }
+
+        if (d.lock_project_mismatch) {
+          if (!mismatchWarned) {
+            toast('Different project detected on shared folder. Auto-connect blocked for safety.', true);
+            mismatchWarned = true;
+          }
+        } else {
+          mismatchWarned = false;
+        }
+
+        const shouldForceWizard = !!d.force_wizard || !setupOk;
+        if (shouldForceWizard && wizStep === 1 && document.getElementById('wizard-overlay').style.display !== 'flex') {
+          if (!setupWarned && d.setup_msg) {
+            toast(d.setup_msg, true);
+            setupWarned = true;
+          }
+          showWizard();
+          if (!autoSetupTried) {
+            autoSetupTried = true;
+            autoFixSetup(false);
+          }
+        }
+
+        document.getElementById('h-player').textContent = myName;
+        document.getElementById('h-badge').className = d.running ? 'badge-online' : 'badge-offline';
+        document.getElementById('h-badge').textContent = d.running ? 'Server Online' : 'Offline';
+
+        document.getElementById('s-running').innerHTML = d.running ? '<span class="val-green">ONLINE</span>' : '<span class="val-red">OFFLINE</span>';
+        document.getElementById('s-host').innerHTML = lockData ? `<span class="val-green">${lockData.host}</span>` : '<span class="val-muted">Nobody</span>';
+        document.getElementById('s-sync').textContent = d.last_sync ? fmtTime(d.last_sync.time) : '--';
+        document.getElementById('s-pending').textContent = String(d.sync_pending_count || 0);
+        suggestServer = d.suggest_server || '';
+        const synCell = document.getElementById('s-syncthing');
+        if (!d.syncthing_ok) synCell.innerHTML = '<span class="val-red">MISSING</span>';
+        else if (d.syncthing_status === 'paused') synCell.innerHTML = '<span class="val-yellow">PAUSED</span>';
+        else if (d.syncthing_status === 'connected') synCell.innerHTML = `<span class="val-green">CONNECTED (${d.syncthing_connected_peers || 0})</span>`;
+        else if (d.syncthing_status === 'running') synCell.innerHTML = '<span class="val-blue">RUNNING</span>';
+        else synCell.innerHTML = '<span class="val-red">STOPPED</span>';
+
+        if (lockData) {
+          document.getElementById('hi-host').textContent = lockData.host;
+          document.getElementById('hi-host').className = 'v active';
+          document.getElementById('hi-ip').textContent = lockData.ip || '--';
+          document.getElementById('hi-time').textContent = fmtTime(lockData.time);
+        } else {
+          document.getElementById('hi-host').textContent = 'Nobody';
+          document.getElementById('hi-host').className = 'v val-muted';
+          document.getElementById('hi-ip').textContent = '--';
+          document.getElementById('hi-time').textContent = '--';
+        }
+        document.getElementById('hi-myip').textContent = d.local_ip || '--';
+        const worldDirEl = document.getElementById('hi-world-dir');
+        if (worldDirEl) worldDirEl.textContent = d.world_dir_effective || 'Not resolved';
+        document.getElementById('hi-tunnel').textContent = d.tunnel_addr || 'Not Active';
+        document.getElementById('hi-stid').textContent = d.st_id || 'Not Running';
+        const hiUi = document.getElementById('hi-ui');
+        if (hiUi) {
+          const uiUrl = lockData && lockData.ui_url ? lockData.ui_url : `${window.location.protocol}//${window.location.host}`;
+          hiUi.textContent = uiUrl;
+        }
+        document.getElementById('hi-pid').textContent = d.server_pid || '--';
+        document.getElementById('hi-uptime').textContent = d.running ? fmtUptime(d.server_uptime_s || 0) : '--';
+        if (d.running && d.server_ram_mb != null) {
+          document.getElementById('hi-ramuse').textContent = `${d.server_ram_mb} MB (alloc ${d.ram || '?'})`;
+        } else if (d.running) {
+          document.getElementById('hi-ramuse').textContent = `alloc ${d.ram || '?'}`;
+        } else {
+          document.getElementById('hi-ramuse').textContent = d.ram ? `alloc ${d.ram}` : '--';
+        }
+        const h = d.health || {};
+        document.getElementById('hi-fin').textContent = h.last_finalize_result ? h.last_finalize_result.toUpperCase() : '--';
+        document.getElementById('hi-rec').textContent = h.last_recovery_time ? `${h.last_recovery_reason || 'unknown'} @ ${fmtTime(h.last_recovery_time)}` : '--';
+        document.getElementById('hi-bkp').textContent = h.last_backup_time ? fmtTime(h.last_backup_time) : '--';
+        document.getElementById('hi-err').textContent = h.last_error || '--';
+        const openSrvBtn = document.getElementById('btn-open-server-files');
+        if (openSrvBtn) openSrvBtn.disabled = !d.can_open_server_files;
+        const openSrvBtn2 = document.getElementById('btn-open-server-files-2');
+        if (openSrvBtn2) openSrvBtn2.disabled = !d.can_open_server_files;
+        const dlBtn = document.getElementById('btn-download-server');
+        if (dlBtn) dlBtn.disabled = !d.can_open_server_files;
+        const dlBtn2 = document.getElementById('btn-download-server-2');
+        if (dlBtn2) dlBtn2.disabled = !d.can_open_server_files;
+        setRestartBtn(false, 'Restart is available only when server is fully running.');
+
+        if (d.task && d.task.running) {
+          showProgress(d.task.pct || 0, d.task.msg || 'Working...');
+          setRestartBtn(false, 'Wait for current task to complete.');
+          const taskAction = String(d.task.action || '').toLowerCase();
+          if (taskAction === 'starting') {
+            setBtn('disabled', '\u23F3', 'STARTING', d.task.msg || 'Server booting...');
+          } else {
+            setBtn('disabled', '\uD83D\uDD04', 'FINALIZING', d.task.msg || 'Saving, backup, sync in progress...');
+          }
+          if (!taskPending) {
+            taskPending = true;
+            if (taskInterval) clearInterval(taskInterval);
+            taskInterval = setInterval(pollTask, 800);
+          }
+        }
+
+        if (taskPending) return;
+
+        if (!setupOk) {
+          setBtn('disabled', '\u2699\uFE0F', 'SETUP', 'Finish wizard to start.', false);
+          setRestartBtn(false, 'Complete setup first.');
+          return;
+        }
+
+        if (d.server_state === 'starting') {
+          setBtn('disabled', '\u23F3', 'STARTING', 'Server booting. Stop is disabled until fully ready.');
+          setRestartBtn(false, 'Wait until server is fully ready.');
+          document.getElementById('server-dot').style.background = 'var(--yellow)';
+          document.getElementById('server-status-label').textContent = 'SERVER STARTING';
+        } else if (d.server_state === 'stopping' || d.server_state === 'recovering') {
+          setBtn('disabled', '\uD83D\uDD04', 'FINALIZING', 'Saving, backup, sync in progress...');
+          setRestartBtn(false, 'Finalize in progress.');
+          document.getElementById('server-dot').style.background = 'var(--accent)';
+          document.getElementById('server-status-label').textContent = 'FINALIZING';
+        } else if (d.running) {
+          let addr = d.tunnel_addr !== "Not Active" ? d.tunnel_addr : d.local_ip + ":25565";
+          setBtn('running', '\u23F9', 'STOP', `Hosting! IP: ${addr}`);
+          setRestartBtn(!!d.server_ready, d.server_ready ? 'Safe restart: stop -> backup/sync -> start.' : 'Wait until server is fully ready.');
+          document.getElementById('server-dot').style.background = 'var(--green)';
+          document.getElementById('server-status-label').textContent = 'SERVER ONLINE';
+        } else if (lockData && lockData.host !== myName) {
+          // Someone else is hosting
+          if (lockData.expired) {
+            setBtn('disabled', '\u26A0\uFE0F', 'EXPIRED', `${lockData.host} pulse missing.\nHost may be offline.\nUse Settings > Force Clear if sure.`);
+            setRestartBtn(false, 'Locked by another host.');
+            document.getElementById('server-dot').style.background = 'var(--accent2)';
+            document.getElementById('server-status-label').textContent = 'MAY BE STUCK: ' + lockData.host.toUpperCase();
+          } else {
+            setBtn('disabled', '\uD83D\uDD12', 'LOCKED', `${lockData.host} is hosting...\nWait for them to stop.`);
+            setRestartBtn(false, 'Locked by another host.');
+            document.getElementById('server-dot').style.background = 'var(--yellow)';
+            document.getElementById('server-status-label').textContent = 'LOCKED BY ' + lockData.host.toUpperCase();
+          }
+        } else {
+          setBtn('', '\u26A1', 'START', `Ready to host.`);
+          setRestartBtn(false, 'Start server first.');
+          document.getElementById('server-dot').style.background = 'var(--muted)';
+          document.getElementById('server-status-label').textContent = 'Server Status';
+        }
+
+        const statusLabel = document.getElementById('p-status');
+        const hostValue = document.getElementById('p-host');
+        const addrValue = document.getElementById('p-addr');
+        const syncValue = document.getElementById('p-sync');
+        const uptimeValue = document.getElementById('p-uptime');
+        const playersValue = document.getElementById('p-players');
+
+        if (d.server_state === 'starting') {
+          statusLabel.textContent = 'Starting';
+          statusLabel.className = 'status-item-value val-yellow';
+        } else if (d.server_state === 'stopping' || d.server_state === 'recovering') {
+          statusLabel.textContent = 'Finalizing';
+          statusLabel.className = 'status-item-value val-blue';
+        } else {
+          statusLabel.textContent = d.running ? 'Running' : 'Offline';
+          statusLabel.className = 'status-item-value ' + (d.running ? 'val-green' : 'val-red');
+        }
+        hostValue.textContent = lockData ? lockData.host : 'None';
+        hostValue.className = 'status-item-value ' + (lockData ? 'val-green' : 'val-muted');
+        addrValue.textContent = d.tunnel_addr !== "Not Active" ? d.tunnel_addr : (d.running ? d.local_ip : '---');
+        addrValue.className = 'status-item-value ' + (d.running ? 'val-blue' : 'val-muted');
+        if (!d.syncthing_ok) {
+          syncValue.textContent = 'Missing';
+          syncValue.className = 'status-item-value val-red';
+        } else if (!d.syncthing_running) {
+          syncValue.textContent = 'Stopped';
+          syncValue.className = 'status-item-value val-red';
+        } else if (d.syncthing_folder_paused) {
+          syncValue.textContent = 'Paused';
+          syncValue.className = 'status-item-value val-yellow';
+        } else if ((d.syncthing_connected_peers || 0) > 0) {
+          syncValue.textContent = 'Connected';
+          syncValue.className = 'status-item-value val-green';
+        } else {
+          syncValue.textContent = 'Running';
+          syncValue.className = 'status-item-value val-blue';
+        }
+        uptimeValue.textContent = d.running ? fmtUptime(d.server_uptime_s || 0) : '--';
+        uptimeValue.className = 'status-item-value ' + (d.running ? 'val-blue' : 'val-muted');
+        const pCount = Number(d.players_count || 0);
+        const pNames = Array.isArray(d.players_online) ? d.players_online : [];
+        latestPlayersOnline = pNames;
+        latestPlayersInfo = d.players_info || {};
+        const plOnline = document.getElementById('pl-online');
+        const plMax = document.getElementById('pl-max');
+        const plWl = document.getElementById('pl-wl');
+        const plNames = document.getElementById('pl-names');
+        if (plOnline) plOnline.textContent = String(pCount);
+        if (plMax) plMax.textContent = String(d.max_players_effective ?? d.max_players ?? 20);
+        if (plWl) plWl.textContent = d.whitelist_effective ? 'ON' : 'OFF';
+        if (plNames) plNames.textContent = pNames.length ? pNames.join(', ') : '--';
+        playersValue.textContent = pCount > 0 ? `${pCount} Online` : '0';
+        playersValue.className = 'status-item-value ' + (pCount > 0 ? 'val-green' : 'val-muted');
+        playersValue.style.cursor = 'pointer';
+        playersValue.title = 'Click to open players controls';
+        playersValue.onclick = () => navTo('players');
+        if (document.getElementById('players-modal').classList.contains('open')) {
+          renderPlayersModal();
+        }
+        if (document.getElementById('remote-modal').classList.contains('open')) {
+          renderRemoteHostModal();
+        }
+
+        const wdState = document.getElementById('wd-state');
+        const wdSync = document.getElementById('wd-last-sync');
+        const wdPending = document.getElementById('wd-pending');
+        if (wdState) wdState.textContent = String(d.server_state || (d.running ? 'running' : 'offline')).toUpperCase();
+        if (wdSync) wdSync.textContent = d.last_sync ? fmtTime(d.last_sync.time) : '--';
+        if (wdPending) wdPending.textContent = String(d.sync_pending_count || 0);
+        const worldInput = document.getElementById('a-world-path');
+        if (worldInput && !worldInput.matches(':focus')) worldInput.value = d.world_dir_override || '';
+        const manualServerInput = document.getElementById('a-server-manual');
+        if (manualServerInput && !manualServerInput.matches(':focus')) manualServerInput.value = d.manual_server_dir || '';
+        const manualSharedInput = document.getElementById('a-shared-manual');
+        if (manualSharedInput && !manualSharedInput.matches(':focus')) manualSharedInput.value = d.manual_shared_dir || '';
+        const manualBackupsInput = document.getElementById('a-backups-manual');
+        if (manualBackupsInput && !manualBackupsInput.matches(':focus')) manualBackupsInput.value = d.manual_backups_dir || '';
+        const manualCrashInput = document.getElementById('a-crash-manual');
+        if (manualCrashInput && !manualCrashInput.matches(':focus')) manualCrashInput.value = d.manual_crash_dir || '';
+
+        updateMetricHistory('cpu', Number(d.server_cpu_pct ?? d.cpu_pct ?? 0), 'm-cpu-c', 'm-cpu-v');
+        updateMetricHistory('mem', Number(d.server_mem_pct ?? d.mem_pct ?? 0), 'm-mem-c', 'm-mem-v');
+        updateMetricHistory('disk', Number(d.server_disk_pct ?? d.disk_pct ?? 0), 'm-disk-c', 'm-disk-v');
+
+        renderBackups(d.backups || []);
+        if (!document.getElementById('s-name').value) fillSettings(d);
+      }
+
+      function setBtn(cls, icon, label, statusText) {
+        const btn = document.getElementById('btn-host');
+        btn.className = 'btn-host ' + cls;
+        btn.disabled = cls === 'disabled';
+        document.getElementById('btn-icon').textContent = icon;
+        document.getElementById('btn-label').textContent = label;
+        document.getElementById('host-status-text').textContent = statusText;
+      }
+
+      function setRestartBtn(enabled, hint = '') {
+        const btn = document.getElementById('btn-restart-main');
+        if (!btn) return;
+        btn.disabled = !enabled || taskPending;
+        btn.title = hint || (enabled ? 'Safe restart: stop -> backup/sync -> start.' : 'Restart is available only when server is fully running.');
+      }
+
+      async function toggleHost() {
+        if (taskPending) return;
+        if (serverState === 'starting') {
+          toast('Wait for startup to complete before stopping.', true);
+          return;
+        }
+        if (serverState === 'stopping' || serverState === 'recovering') {
+          toast('Finalize already running. Please wait.', true);
+          return;
+        }
+        taskPending = true;
+        const action = serverRunning ? 'stop' : 'start';
+        showProgress(0, action === 'stop' ? 'Stopping...' : 'Starting...');
+        try {
+          const r = await fetch('/host/' + action, { method: 'POST', body: '{}', headers: { 'Content-Type': 'application/json' } });
+          const d = await r.json();
+          if (!d.ok) { toast(d.msg, true); taskPending = false; hideProgress(); return; }
+          taskInterval = setInterval(pollTask, 800);
+        } catch (e) {
+          taskPending = false;
+          hideProgress();
+        }
+      }
+
+      async function restartHost() {
+        if (taskPending) return;
+        if (!serverRunning || serverState !== 'running') {
+          toast('Restart is available only when server is fully running.', true);
+          return;
+        }
+        const ok = confirm('Restart server now? This will stop, backup/sync, then start again.');
+        if (!ok) return;
+        taskPending = true;
+        showProgress(0, 'Restarting...');
+        try {
+          const d = await apiFetchJson('/host/restart', { method: 'POST', body: '{}', headers: { 'Content-Type': 'application/json' } }, 10000);
+          if (!d.ok) {
+            taskPending = false;
+            hideProgress();
+            toast(d.msg || 'Restart failed', true);
+            return;
+          }
+          taskInterval = setInterval(pollTask, 800);
+        } catch (e) {
+          taskPending = false;
+          hideProgress();
+          toast('Restart request failed', true);
+        }
+      }
+
+      async function killHost() {
+        const ok = confirm('Send KILL signal? Use only if server is stuck.');
+        if (!ok) return;
+        const r = await fetch('/host/kill', { method: 'POST', body: '{}', headers: { 'Content-Type': 'application/json' } });
+        const d = await r.json();
+        toast(d.msg || (d.ok ? 'Killed' : 'Kill failed'), !d.ok);
+      }
+
+      async function refreshPlayers() {
+        const r = await fetch('/players/refresh', { method: 'POST', body: '{}', headers: { 'Content-Type': 'application/json' } });
+        const d = await r.json();
+        if (!d.ok) toast(d.msg || 'Refresh failed', true);
+      }
+
+      async function syncNow() {
+        const r = await fetch('/sync/now', { method: 'POST', body: '{}', headers: { 'Content-Type': 'application/json' } });
+        const d = await r.json();
+        toast(d.msg || (d.ok ? 'Sync triggered' : 'Sync failed'), !d.ok);
+      }
+
+      async function downloadServerFiles() {
+        const btn1 = document.getElementById('btn-download-server');
+        const btn2 = document.getElementById('btn-download-server-2');
+        const old1 = btn1 ? btn1.textContent : '';
+        const old2 = btn2 ? btn2.textContent : '';
+        [btn1, btn2].forEach(b => {
+          if (!b) return;
+          b.disabled = true;
+          b.textContent = 'Preparing Download...';
+        });
+        try {
+          const r = await fetch('/server/download');
+          const ctype = (r.headers.get('content-type') || '').toLowerCase();
+          if (!r.ok) {
+            const msg = await r.text();
+            toast(msg || `Download failed (${r.status})`, true);
+            return;
+          }
+          if (!(ctype.includes('application/zip') || ctype.includes('application/octet-stream'))) {
+            const msg = await r.text();
+            toast(msg || 'Download endpoint returned invalid file type', true);
+            return;
+          }
+          const blob = await r.blob();
+          const disp = r.headers.get('content-disposition') || '';
+          let fname = 'server_files.zip';
+          const m = /filename=\"?([^\";]+)\"?/i.exec(disp);
+          if (m && m[1]) fname = m[1];
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = fname;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 1500);
+          toast('Server files downloaded');
+        } catch (e) {
+          toast(`Download failed: ${e?.message || 'network error'}`, true);
+        } finally {
+          if (btn1) {
+            btn1.disabled = false;
+            btn1.textContent = old1 || 'Download Current Server Files';
+          }
+          if (btn2) {
+            btn2.disabled = false;
+            btn2.textContent = old2 || 'Download Current Server Files';
+          }
+        }
+      }
+
+      async function quickstartSetup() {
+        const r = await fetch('/setup/quickstart', { method: 'POST', body: '{}', headers: { 'Content-Type': 'application/json' } });
+        const d = await r.json();
+        toast(d.msg || (d.ok ? 'Quickstart complete' : 'Quickstart partial'), !d.ok);
+        if (d.server_dir) document.getElementById('s-server').value = d.server_dir;
+        if (d.shared_dir) document.getElementById('s-shared').value = d.shared_dir;
+      }
+
+      async function playerAction(action) {
+        const input = document.getElementById('p-selected');
+        const player = (input.value || '').trim();
+        if (!player) {
+          toast('Enter/select player username first', true);
+          return;
+        }
+        const r = await fetch('/players/action', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action, player })
+        });
+        const d = await r.json();
+        toast(d.msg || (d.ok ? 'Action sent' : 'Action failed'), !d.ok);
+      }
+
+      async function sendCmd() {
+        const input = document.getElementById('cmd-input');
+        const cmd = input.value.trim();
+        if (!cmd) return;
+        input.value = '';
+        fetch('/command', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cmd }) });
+      }
+
+      function renderLogs(lines) {
+        const wrap = document.getElementById('log-wrap');
+        const wrapHistory = document.getElementById('log-wrap-history');
+        if (!lines || !lines.length) return;
+        const html = lines.map(l => {
+          let cls = 'log-line';
+          if (/error|exception|fatal/i.test(l)) cls += ' err';
+          else if (/warn/i.test(l)) cls += ' warn';
+          else if (/done|joined|logged in/i.test(l)) cls += ' done';
+          else if (/info/i.test(l)) cls += ' info';
+          return `<div class="${cls}">${escHtml(l)}</div>`;
+        }).join('');
+        if (wrap) {
+          wrap.innerHTML = html;
+          wrap.scrollTop = wrap.scrollHeight;
+        }
+        if (wrapHistory) {
+          wrapHistory.innerHTML = html;
+          wrapHistory.scrollTop = wrapHistory.scrollHeight;
+        }
+      }
+
+      function renderLogDetails(d) {
+        if (!d || !d.ok) return;
+        const e = document.getElementById('lg-err');
+        const w = document.getElementById('lg-warn');
+        const c = document.getElementById('lg-crash');
+        if (e) e.textContent = String(d.error_count || 0);
+        if (w) w.textContent = String(d.warn_count || 0);
+        if (c) c.textContent = String(d.crash_count || 0);
+
+        const issuesWrap = document.getElementById('log-issues');
+        if (issuesWrap) {
+          const issues = Array.isArray(d.issues) ? d.issues : [];
+          if (!issues.length) {
+            issuesWrap.innerHTML = '<div class="issue-row">No warnings/errors detected recently.</div>';
+          } else {
+            issuesWrap.innerHTML = issues.slice(0, 100).map(it => `
+              <div class="issue-row ${it.level === 'error' ? 'err' : 'warn'}">
+                <span class="issue-meta">${escHtml(String(it.level || '').toUpperCase())}</span>
+                <span class="issue-meta">${escHtml(String(it.source || 'log'))}</span>
+                ${escHtml(String(it.line || ''))}
+              </div>
+            `).join('');
+          }
+        }
+
+        const crashWrap = document.getElementById('log-crashes');
+        if (crashWrap) {
+          const crashes = Array.isArray(d.crash_reports) ? d.crash_reports : [];
+          if (!crashes.length) {
+            crashWrap.innerHTML = '<div class="issue-row">No crash reports detected.</div>';
+          } else {
+            crashWrap.innerHTML = crashes.slice(0, 12).map(cr => `
+              <div class="issue-row err">
+                <span class="issue-meta">CRASH</span>
+                <span class="issue-meta">${escHtml(fmtTime(cr.mtime))}</span>
+                <div style="margin-top:4px">${escHtml(cr.name || 'crash-report')}</div>
+                <div style="margin-top:4px;color:var(--muted)">${escHtml(cr.headline || 'Crash report')}</div>
+              </div>
+            `).join('');
+          }
+        }
+      }
+
+      function showTab(id, titleText = '') {
+        document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+        const panel = document.getElementById(id);
+        if (panel) panel.classList.add('active');
+        const t = document.getElementById('utility-title');
+        if (t && titleText) t.textContent = titleText.toUpperCase();
+      }
+
+      function setNavActive(key) {
+        document.querySelectorAll('.sb-btn').forEach(b => b.classList.remove('active'));
+        const el = document.getElementById(`nav-${key}`);
+        if (el) el.classList.add('active');
+        if (key) currentNavKey = key;
+      }
+
+      function scrollToSection(id) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+
+      function openControlPanel(panelId, title, navKey) {
+        showTab(panelId, title);
+        setNavActive(navKey || 'options');
+        const card = document.getElementById('section-sidepanel');
+        const ov = document.getElementById('sidepanel-overlay');
+        if (card) card.classList.add('modal-open');
+        if (ov) ov.classList.add('open');
+      }
+
+      function closeControlPanel() {
+        const card = document.getElementById('section-sidepanel');
+        const ov = document.getElementById('sidepanel-overlay');
+        if (card) card.classList.remove('modal-open');
+        if (ov) ov.classList.remove('open');
+        showTab('t-options', 'Options');
+        setNavActive('server');
+      }
+
+      function navTo(section) {
+        setNavActive(section);
+        if (section === 'server') {
+          closeControlPanel();
+          scrollToSection('section-server');
+          return;
+        }
+        if (section === 'log') {
+          openControlPanel('t-log', 'Log', section);
+          pollLogs();
+          pollLogDetails();
+          const lw = document.getElementById('log-wrap-history');
+          if (lw) {
+            lw.classList.add('focus');
+            setTimeout(() => lw.classList.remove('focus'), 900);
+          }
+          return;
+        }
+        if (section === 'players') {
+          openControlPanel('t-players', 'Players', section);
+          return;
+        }
+        if (section === 'files') {
+          openControlPanel('t-files', 'Files', section);
+          return;
+        }
+        if (section === 'worlds') {
+          openControlPanel('t-worlds', 'Worlds', section);
+          return;
+        }
+        if (section === 'backups') {
+          openControlPanel('t-backups', 'Backups', section);
+          return;
+        }
+        if (section === 'access') {
+          openControlPanel('t-access', 'Access', section);
+          pollDiagnostics();
+          return;
+        }
+        openControlPanel('t-options', 'Options', 'options');
+      }
+
+      function openPlayersPage() {
+        navTo('players');
+      }
+
+      function toggleAccessAdvanced() {
+        const box = document.getElementById('access-advanced');
+        if (!box) return;
+        box.classList.toggle('open');
+      }
+
+      function resolvedTheme(pref) {
+        if (pref === 'dark' || pref === 'light') return pref;
+        return (mediaTheme && mediaTheme.matches) ? 'dark' : 'light';
+      }
+
+      function applyTheme(pref) {
+        const t = resolvedTheme(pref);
+        document.documentElement.setAttribute('data-theme', t);
+      }
+
+      function setThemePreference(pref) {
+        themePref = pref || 'dark';
+        localStorage.setItem('mc_theme_pref', themePref);
+        applyTheme(themePref);
+      }
+
+      function initTheme() {
+        themePref = localStorage.getItem('mc_theme_pref') || 'dark';
+        applyTheme(themePref);
+        const sel = document.getElementById('s-theme');
+        if (sel) sel.value = themePref;
+        if (mediaTheme && mediaTheme.addEventListener) {
+          mediaTheme.addEventListener('change', () => {
+            if (themePref === 'system') applyTheme('system');
+          });
+        } else if (mediaTheme && mediaTheme.addListener) {
+          mediaTheme.addListener(() => {
+            if (themePref === 'system') applyTheme('system');
+          });
+        }
+      }
+
+      function showProgress(pct, msg) {
+        const wrap = document.getElementById('progress-wrap');
+        wrap.classList.add('visible');
+        document.getElementById('progress-bar').style.width = pct + '%';
+        document.getElementById('progress-msg').textContent = msg;
+      }
+
+      function hideProgress() {
+        document.getElementById('progress-wrap').classList.remove('visible');
+      }
+
+      function toast(msg, isErr = false) {
+        const t = document.getElementById('toast');
+        t.textContent = msg;
+        t.className = 'show' + (isErr ? ' err' : '');
+        setTimeout(() => t.classList.remove('show'), 3000);
+      }
+
+      async function openFolder(target) {
+        try {
+          const manualMap = {
+            server: 'a-server-manual',
+            shared: 'a-shared-manual',
+            'shared-world': 'a-shared-manual',
+            world: 'a-shared-manual',
+            worlds: 'a-shared-manual',
+            world_latest: 'a-shared-manual',
+            backups: 'a-backups-manual',
+            'crash-reports': 'a-crash-manual'
+          };
+          const manualInputId = manualMap[target];
+          const manualPath = manualInputId ? ((document.getElementById(manualInputId)?.value || '').trim()) : '';
+          let r;
+          if (manualPath) {
+            r = await fetch('/open-folder?target=custom&path=' + encodeURIComponent(manualPath));
+          } else {
+            r = await fetch('/open-folder?target=' + encodeURIComponent(target));
+          }
+          let d = await r.json();
+          if (!d.ok && (target === 'world_latest' || target === 'shared-world' || target === 'world' || target === 'worlds')) {
+            // compatibility fallback for mixed old/new backend builds
+            const fallbackPath = (document.getElementById('a-world-path')?.value || '').trim();
+            if (fallbackPath) {
+              r = await fetch('/open-folder?target=custom&path=' + encodeURIComponent(fallbackPath));
+            } else {
+              r = await fetch('/open-folder?target=' + encodeURIComponent('shared-world'));
+            }
+            d = await r.json();
+          }
+          if (d.ok) toast(d.path ? `Opened: ${d.path}` : 'Opened folder');
+          else {
+            const msg = d.msg || 'Cannot open folder';
+            toast(msg, true);
+          }
+        } catch (e) {
+          toast('Cannot open folder', true);
+        }
+      }
+
+      async function openTypedFolder(inputId) {
+        const el = document.getElementById(inputId);
+        const path = (el && el.value ? el.value : '').trim();
+        if (!path) {
+          toast('Path is empty', true);
+          return;
+        }
+        try {
+          const r = await fetch('/open-folder?target=custom&path=' + encodeURIComponent(path));
+          const d = await r.json();
+          if (d.ok) toast(d.path ? `Opened: ${d.path}` : 'Opened folder');
+          else toast(d.msg || 'Cannot open folder', true);
+        } catch (e) {
+          toast('Cannot open folder', true);
+        }
+      }
+
+      function escHtml(s) {
+        const v = String(s ?? '');
+        return v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      }
+
+      function fmtTime(iso) {
+        if (!iso) return '--';
+        try {
+          const d = new Date(iso);
+          return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        } catch (e) { return iso; }
+      }
+
+      function fmtUptime(sec) {
+        sec = Number(sec || 0);
+        const h = Math.floor(sec / 3600);
+        const m = Math.floor((sec % 3600) / 60);
+        const s = Math.floor(sec % 60);
+        if (h > 0) return `${h}h ${m}m`;
+        if (m > 0) return `${m}m ${s}s`;
+        return `${s}s`;
+      }
+
+      function updateMetricHistory(key, value, canvasId, valueId) {
+        const arr = metricHist[key];
+        arr.push(Math.max(0, Math.min(100, value)));
+        if (arr.length > 60) arr.shift();
+        const vv = document.getElementById(valueId);
+        if (vv) vv.textContent = `${Math.round(value)}%`;
+        drawMetric(canvasId, arr);
+      }
+
+      function drawMetric(canvasId, values) {
+        const c = document.getElementById(canvasId);
+        if (!c) return;
+        const rect = c.getBoundingClientRect();
+        const w = Math.max(120, Math.floor(rect.width || c.clientWidth || 220));
+        const h = Math.max(40, Math.floor(rect.height || c.clientHeight || 48));
+        if (c.width !== w) c.width = w;
+        if (c.height !== h) c.height = h;
+        const ctx = c.getContext('2d');
+        ctx.clearRect(0, 0, w, h);
+        ctx.strokeStyle = '#d1d5db';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(0, h - 1);
+        ctx.lineTo(w, h - 1);
+        ctx.stroke();
+        if (!values.length) return;
+        const step = w / Math.max(1, values.length - 1);
+        ctx.beginPath();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = '#2ea043';
+        values.forEach((v, i) => {
+          const x = i * step;
+          const y = h - (v / 100) * (h - 4) - 2;
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+      }
+
+      function closePlayersModal() {
+        document.getElementById('players-modal').classList.remove('open');
+      }
+
+      function openPlayersModal() {
+        if (serverRunning) refreshPlayers();
+        renderPlayersModal();
+        document.getElementById('players-modal').classList.add('open');
+      }
+
+      function renderPlayersModal() {
+        const summary = document.getElementById('players-summary');
+        const wrap = document.getElementById('players-modal-body');
+        const total = latestPlayersOnline.length;
+        if (summary) {
+          summary.textContent = `Online: ${total} player(s) | Live updates every ~1.2s | Click close to return dashboard`;
+        }
+        const names = Object.keys(latestPlayersInfo || {});
+        if (!names.length) {
+          wrap.innerHTML = '<div class="player-row"><div class="player-meta">No players online right now.</div></div>';
+          return;
+        }
+        wrap.innerHTML = names.map(name => {
+          const p = latestPlayersInfo[name] || {};
+          const gm = (p.gamemode || 'unknown').toUpperCase();
+          const hpNum = Number(p.health != null ? p.health : 0);
+          const hgNum = Number(p.hunger != null ? p.hunger : 0);
+          const hp = Number.isFinite(hpNum) ? `${hpNum}/20` : '?';
+          const hunger = Number.isFinite(hgNum) ? `${hgNum}/20` : '?';
+          const hpPct = Number.isFinite(hpNum) ? Math.max(0, Math.min(100, (hpNum / 20) * 100)) : 0;
+          const hgPct = Number.isFinite(hgNum) ? Math.max(0, Math.min(100, (hgNum / 20) * 100)) : 0;
+          return `
+            <div class="player-row">
+              <div class="player-name">${escHtml(name)}</div>
+              <div class="player-stat-line"><span>Gamemode</span><span>${gm}</span></div>
+              <div class="player-bars">
+                <div class="bar-wrap">
+                  <div class="k">Health</div>
+                  <div class="bar-track"><div class="bar-fill hp" style="width:${hpPct}%"></div></div>
+                  <div class="bar-num">${hp}</div>
+                </div>
+                <div class="bar-wrap">
+                  <div class="k">Hunger</div>
+                  <div class="bar-track"><div class="bar-fill hg" style="width:${hgPct}%"></div></div>
+                  <div class="bar-num">${hunger}</div>
+                </div>
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+
+      function closeStatModal() {
+        document.getElementById('stat-modal').classList.remove('open');
+      }
+
+      function openStatModal(type) {
+        const s = latestStatusSnapshot || {};
+        const title = document.getElementById('stat-title');
+        const main = document.getElementById('stat-main');
+        const sub = document.getElementById('stat-sub');
+        let t = 'Details';
+        let m = '--';
+        let sb = 'Live status detail.';
+        if (type === 'server') {
+          t = 'Server Status';
+          m = s.running ? 'RUNNING' : 'OFFLINE';
+          sb = s.server_state ? `Current state: ${String(s.server_state).toUpperCase()}` : 'No state available.';
+        } else if (type === 'host') {
+          t = 'Current Host';
+          m = s.lock && s.lock.host ? s.lock.host : 'Nobody';
+          sb = s.lock && s.lock.time ? `Hosting since ${fmtTime(s.lock.time)}` : 'No active host lock.';
+        } else if (type === 'address') {
+          t = 'Server Address';
+          m = s.tunnel_addr && s.tunnel_addr !== 'Not Active' ? s.tunnel_addr : (s.running ? `${s.local_ip}:25565` : '---');
+          sb = (s.tunnel_addr && s.tunnel_addr !== 'Not Active') ? 'Public tunnel is active.' : 'Local network address.';
+        } else if (type === 'sync') {
+          t = 'Sync Status';
+          m = (s.syncthing_status || 'stopped').toUpperCase();
+          sb = `Pending items: ${s.sync_pending_count || 0}`;
+        } else if (type === 'uptime') {
+          t = 'Server Uptime';
+          m = s.running ? fmtUptime(s.server_uptime_s || 0) : 'OFFLINE';
+          sb = s.server_pid ? `Process ID: ${s.server_pid}` : 'Server process is not running.';
+        }
+        title.textContent = t;
+        main.textContent = m;
+        sub.textContent = sb;
+        document.getElementById('stat-modal').classList.add('open');
+      }
+
+      function closeRemoteHostModal() {
+        document.getElementById('remote-modal').classList.remove('open');
+        if (currentNavKey === 'remote-host') {
+          setNavActive(remotePrevNavKey || 'server');
+        }
+      }
+
+      function openRemoteHostModal() {
+        remotePrevNavKey = currentNavKey || 'server';
+        setNavActive('remote-host');
+        renderRemoteHostModal();
+        document.getElementById('remote-modal').classList.add('open');
+      }
+
+      function renderRemoteHostModal() {
+        const wrap = document.getElementById('remote-modal-body');
+        if (!wrap) return;
+        const nodes = Array.isArray(latestRemoteNodes) ? latestRemoteNodes : [];
+        const peers = nodes.filter(n => !n.is_local && n.node_id !== localNodeId);
+        if (!peers.length) {
+          wrap.innerHTML = '<div class="issue-row">No other active PC found yet. Open this app on the other machine and wait ~5-10s.</div>';
+          return;
+        }
+        wrap.innerHTML = peers.map(n => {
+          const title = `${n.user || 'Unknown'} @ ${n.hostname || 'PC'}`;
+          const online = !!n.online;
+          const state = (n.server_state || 'offline').toUpperCase();
+          const sub = `${online ? 'Online' : 'Offline'} | ${state} | ${n.ip || '--'} | ${n.ui_url || '--'}`;
+          const canStart = online && !n.task_running && !n.server_running;
+          const canStop = online && !!n.server_running;
+          return `
+            <div class="remote-row">
+              <div class="remote-main">
+                <div class="remote-title">${escHtml(title)}</div>
+                <div class="remote-sub">${escHtml(sub)}</div>
+              </div>
+              <div class="remote-actions">
+                <button class="btn-backup" ${canStart ? '' : 'disabled'} onclick="dispatchRemoteHost('${escHtml(String(n.node_id || ''))}','start')">&#9889; Start There</button>
+                <button class="btn-force" ${canStop ? '' : 'disabled'} onclick="dispatchRemoteHost('${escHtml(String(n.node_id || ''))}','stop')">&#x23F9; Stop There</button>
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+
+      async function dispatchRemoteHost(nodeId, action) {
+        const act = (action || '').toLowerCase();
+        if (!nodeId || !['start', 'stop'].includes(act)) return;
+        const row = (latestRemoteNodes || []).find(n => String(n.node_id || '') === String(nodeId || ''));
+        const label = row ? `${row.user || 'Unknown'} @ ${row.hostname || 'PC'}` : 'selected PC';
+        if (!confirm(`${act.toUpperCase()} on ${label}?`)) return;
+        try {
+          const r = await fetch('/host/dispatch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ target_node_id: nodeId, action: act })
+          });
+          const d = await r.json();
+          toast(d.msg || (d.ok ? 'Request sent' : 'Request failed'), !d.ok);
+          if (d.ok) {
+            setTimeout(() => pollStatus(), 900);
+          }
+        } catch (e) {
+          toast('Failed to send remote host request', true);
+        }
+      }
+
+      function fillSettings(d) {
+        document.getElementById('s-name').value = d.user || '';
+        document.getElementById('s-server').value = d.server_dir || '';
+        document.getElementById('s-shared').value = d.shared_dir || '';
+        document.getElementById('s-jar').value = d.server_jar || '';
+        setRamControls('s', d.ram || '4G');
+        const maxInput = document.getElementById('s-max-players');
+        if (maxInput) maxInput.value = String(d.max_players_effective ?? d.max_players ?? 20);
+        const wlInput = document.getElementById('s-whitelist');
+        if (wlInput) wlInput.checked = !!(d.whitelist_effective ?? d.whitelist_enabled);
+        const pk = document.getElementById('s-project-key');
+        if (pk) pk.value = d.project_key || '';
+        const worldInput = document.getElementById('a-world-path');
+        if (worldInput) worldInput.value = d.world_dir_override || '';
+        const manualServerInput = document.getElementById('a-server-manual');
+        if (manualServerInput) manualServerInput.value = d.manual_server_dir || '';
+        const manualSharedInput = document.getElementById('a-shared-manual');
+        if (manualSharedInput) manualSharedInput.value = d.manual_shared_dir || '';
+        const manualBackupsInput = document.getElementById('a-backups-manual');
+        if (manualBackupsInput) manualBackupsInput.value = d.manual_backups_dir || '';
+        const manualCrashInput = document.getElementById('a-crash-manual');
+        if (manualCrashInput) manualCrashInput.value = d.manual_crash_dir || '';
+      }
+
+      async function saveSettings() {
+        const ramVal = getRamFromControls('s');
+        if (!ramVal) return;
+        const maxPlayersRaw = parseInt((document.getElementById('s-max-players').value || '20').trim(), 10);
+        const maxPlayers = Number.isFinite(maxPlayersRaw) ? Math.max(1, Math.min(500, maxPlayersRaw)) : 20;
+        const body = {
+          user: document.getElementById('s-name').value,
+          server_dir: document.getElementById('s-server').value,
+          shared_dir: document.getElementById('s-shared').value,
+          server_jar: document.getElementById('s-jar').value,
+          ram: ramVal,
+          max_players: maxPlayers,
+          whitelist_enabled: !!document.getElementById('s-whitelist').checked
+        };
+        const r = await fetch('/config/save', { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } });
+        const d = await r.json();
+        if (d.ok) { toast(d.warn || 'Settings saved!', !!d.warn); pollStatus(); }
+        else toast('Error saving settings', true);
+      }
+
+      async function saveWorldPath() {
+        const input = document.getElementById('a-world-path');
+        const val = (input && input.value ? input.value : '').trim();
+        const r = await fetch('/config/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ world_dir_override: val })
+        });
+        const d = await r.json();
+        if (d.ok) {
+          toast(val ? 'World folder override saved' : 'World folder override cleared');
+          pollStatus();
+        } else {
+          toast(d.msg || 'Failed to save world path', true);
+        }
+      }
+
+      async function saveManualPaths() {
+        const body = {
+          manual_server_dir: (document.getElementById('a-server-manual')?.value || '').trim(),
+          manual_shared_dir: (document.getElementById('a-shared-manual')?.value || '').trim(),
+          manual_backups_dir: (document.getElementById('a-backups-manual')?.value || '').trim(),
+          manual_crash_dir: (document.getElementById('a-crash-manual')?.value || '').trim()
+        };
+        try {
+          const r = await fetch('/config/save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+          });
+          const d = await r.json();
+          if (d.ok) {
+            toast('Manual paths saved');
+            pollStatus();
+          } else {
+            toast(d.msg || 'Failed to save manual paths', true);
+          }
+        } catch (e) {
+          toast('Failed to save manual paths', true);
+        }
+      }
+
+      function renderBackups(list) {
+        const wrap = document.getElementById('backup-list');
+        if (!list || !list.length) { wrap.innerHTML = '<div class="no-backups">No backups yet.</div>'; return; }
+        wrap.innerHTML = list.map(b => `
+    <div class="backup-item">
+      <div class="b-icon">&#x1F4E6;</div>
+      <div class="b-info">
+        <div class="b-time">${b.time}</div>
+        <div class="b-name">${b.name}</div>
+      </div>
+      <div class="b-size">${b.size_mb} MB</div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <button class="btn-send" style="padding:4px 8px" onclick="restoreBackup('${b.name}')">&#x21BA; Restore</button>
+        <div class="b-download"><a href="/backup/get?name=${encodeURIComponent(b.name)}" download="${b.name}">Download</a></div>
+      </div>
+    </div>
+  `).join('');
+      }
+
+      async function doBackup() {
+        toast('Backup started...');
+        const r = await fetch('/backup/now', { method: 'POST' });
+        const d = await r.json();
+        if (!d.ok) {
+          toast(d.msg || 'Backup failed to start', true);
+          return;
+        }
+        taskPending = true;
+        taskInterval = setInterval(pollTask, 800);
+      }
+
+      async function restoreBackup(name) {
+        const ok = confirm(`Restore backup ${name}? Server must stay OFFLINE.`);
+        if (!ok) return;
+        const r = await fetch('/backup/restore', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name })
+        });
+        const d = await r.json();
+        if (!d.ok) {
+          toast(d.msg || 'Restore failed', true);
+          return;
+        }
+        taskPending = true;
+        taskInterval = setInterval(pollTask, 800);
+      }
+
+      async function forceClear() {
+        if (!confirm('Are you sure? Only use if someone crashed and lock is stuck.')) return;
+        const r = await fetch('/host/force', { method: 'POST' });
+        const d = await r.json();
+        toast(d.msg);
+        pollStatus();
+      }
+
+      function copyText(txt) {
+        if (!txt) {
+          toast('Nothing to copy', true);
+          return;
+        }
+        navigator.clipboard.writeText(txt);
+        toast('Copied to clipboard!');
+      }
+    </script>
+</body>
+
+</html>
+
+
+
+

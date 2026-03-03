@@ -1,0 +1,31 @@
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Virtual env / local tooling
+venv/
+.venv/
+.vscode/
+
+# Build artifacts
+build/
+dist/
+release/
+*.spec
+
+# Runtime/user-local data
+.env
+.pyre_configuration
+app_data/settings.json
+app_data/current_host.txt
+current_host.txt
+*.log
+*.tmp
+
+# Accidental local import folder (do not publish)
+C:\\Users\\user\\Downloads\\New folder\\server/
+
+# Ignore any accidental Windows-import style folders
+C:*
+
+app_data/
