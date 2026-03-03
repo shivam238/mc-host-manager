@@ -1,4 +1,4 @@
-﻿"""
+"""
 MC Host Manager - Phase 2 (Modular & Reliable)
 """
 
@@ -6,10 +6,12 @@ import sys
 from pathlib import Path
 
 try:
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    if hasattr(sys.stderr, "reconfigure"):
-        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    reconfig_out = getattr(sys.stdout, "reconfigure", None)
+    if callable(reconfig_out):
+        reconfig_out(encoding="utf-8", errors="replace")
+    reconfig_err = getattr(sys.stderr, "reconfigure", None)
+    if callable(reconfig_err):
+        reconfig_err(encoding="utf-8", errors="replace")
 except Exception:
     pass
 
@@ -43,12 +45,14 @@ import time
 import tempfile
 import secrets
 import re
+import base64
 import atexit
 import signal
 import webbrowser
 from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
+from typing import Any, Callable, TypeVar, cast
 
 try:
     import psutil
@@ -78,6 +82,11 @@ DEFAULT_CONFIG = {
     "ram": "4G",
     "max_players": 20,
     "whitelist_enabled": False,
+    "auto_accept_pending": True,
+    "allowed_syncthing_devices": [],
+    "allowed_syncthing_devices_meta": {},
+    "auto_host_switch": True,
+    "auto_self_heal_syncthing": True,
     "auto_backup": True,
     "backup_keep": 5,
     "wizard_completed": False,
@@ -163,10 +172,28 @@ def bootstrap_bundled_bin_assets() -> None:
 def normalize_path_value(value: str | Path | None) -> str:
     if value is None:
         return ""
-    txt = str(value).strip()
+    txt = str(value).strip().strip('"').strip("'")
     if not txt:
         return ""
+    # Cross-OS safety: avoid treating Windows paths as local Linux folders (and vice-versa).
+    is_windows_style = bool(re.match(r"^[A-Za-z]:[\\/]", txt))
+    is_unix_style = txt.startswith("/")
+    if platform.system() == "Windows" and is_unix_style:
+        return ""
+    if platform.system() != "Windows" and is_windows_style:
+        return ""
     return str(Path(txt).expanduser())
+
+
+def _path_style_mismatch_for_os(raw_path: str | Path | None) -> bool:
+    txt = str(raw_path or "").strip().strip('"').strip("'")
+    if not txt:
+        return False
+    is_windows_style = bool(re.match(r"^[A-Za-z]:[\\/]", txt))
+    is_unix_style = txt.startswith("/")
+    if platform.system() == "Windows":
+        return is_unix_style
+    return is_windows_style
 
 
 def ensure_shared_layout(shared_dir: str | Path) -> Path:
@@ -260,6 +287,11 @@ PRESENCE_RETENTION_S = 24 * 3600
 CONTROL_TMP_RETENTION_S = 10 * 60
 DOWNLOAD_TMP_RETENTION_S = 6 * 3600
 HOUSEKEEPING_INTERVAL_S = 90
+AUTO_ACCEPT_INTERVAL_S = 8.0
+AUTO_HEAL_INTERVAL_S = 7.0
+AUTO_HEAL_MIN_GAP_S = 15.0
+AUTO_SWITCH_WAIT_S = 90.0
+TRUST_DEVICE_TTL_S = 14 * 24 * 3600
 
 
 def _safe_unlink(path: Path) -> bool:
@@ -343,6 +375,7 @@ def publish_local_presence(cfg) -> None:
             "hostname": socket.gethostname(),
             "ip": _best_local_ip(),
             "ui_url": f"http://{_best_local_ip()}:7842",
+            "syncthing_id": _cached_value("syn:myid:presence", 15.0, lambda: str(st_api.get_my_id() or "")),
             "project_key": pkey,
             "server_running": bool(mc_server.is_running()),
             "task_running": bool(is_task_running()),
@@ -386,6 +419,7 @@ def get_remote_nodes(cfg) -> list[dict]:
                     "hostname": str(row.get("hostname", "") or ""),
                     "ip": str(row.get("ip", "") or ""),
                     "ui_url": str(row.get("ui_url", "") or ""),
+                    "syncthing_id": str(row.get("syncthing_id", "") or ""),
                     "server_running": bool(row.get("server_running")),
                     "task_running": bool(row.get("task_running")),
                     "server_state": str(row.get("server_state", "offline") or "offline"),
@@ -431,6 +465,75 @@ def dispatch_remote_host_action(cfg, target_node_id: str, action: str) -> tuple[
         return True, f"{action.title()} request sent to selected PC.", req_id
     except Exception as e:
         return False, f"Failed to send remote request: {e}", ""
+
+
+def _find_node_for_lock(cfg, lock_info: dict | None) -> str:
+    if not isinstance(lock_info, dict):
+        return ""
+    owner = str(lock_info.get("owner_node_id", "") or "").strip()
+    if owner and owner != get_local_node_id():
+        return owner
+
+    lock_user = str(lock_info.get("host", "") or "").strip().lower()
+    lock_host = str(lock_info.get("hostname", "") or "").strip().lower()
+    lock_ip = str(lock_info.get("ip", "") or "").strip()
+    lock_ui = str(lock_info.get("ui_url", "") or "").strip()
+    for node in get_remote_nodes(cfg):
+        if not isinstance(node, dict) or bool(node.get("is_local")):
+            continue
+        node_id = str(node.get("node_id", "") or "").strip()
+        if not node_id:
+            continue
+        if lock_user and lock_user == str(node.get("user", "") or "").strip().lower():
+            return node_id
+        if lock_host and lock_host == str(node.get("hostname", "") or "").strip().lower():
+            return node_id
+        if lock_ip and lock_ip == str(node.get("ip", "") or "").strip():
+            return node_id
+        if lock_ui and lock_ui == str(node.get("ui_url", "") or "").strip():
+            return node_id
+    return ""
+
+
+def wait_for_remote_ack(cfg, request_id: str, timeout_s: float = 35.0) -> tuple[bool, str]:
+    shared = normalize_path_value(cfg.get("shared_dir", ""))
+    req = str(request_id or "").strip()
+    if not shared or not req:
+        return False, "Missing shared folder or request id."
+    ack_file = _acks_dir(shared) / f"{req}.json"
+    pkey = str(cfg.get("project_key", "") or "").strip() or ensure_project_key(cfg)
+    end = time.time() + max(1.0, float(timeout_s))
+    while time.time() < end:
+        row = _read_json_safe(ack_file)
+        if isinstance(row, dict) and str(row.get("request_id", "") or "").strip() == req:
+            row_key = str(row.get("project_key", "") or "").strip()
+            if row_key and pkey and row_key != pkey:
+                return False, "Received ack for another project key."
+            ok = bool(row.get("ok"))
+            msg = str(row.get("msg", "") or ("Accepted" if ok else "Rejected")).strip()
+            return ok, msg
+        time.sleep(0.45)
+    return False, "Timed out waiting for remote host acknowledgement."
+
+
+def wait_for_lock_release(cfg, timeout_s: float = AUTO_SWITCH_WAIT_S) -> tuple[bool, str]:
+    shared = normalize_path_value(cfg.get("shared_dir", ""))
+    if not shared:
+        return False, "Shared folder is not configured."
+    pkey = str(cfg.get("project_key", "") or "").strip() or ensure_project_key(cfg)
+    end = time.time() + max(2.0, float(timeout_s))
+    while time.time() < end:
+        lk = lock_manager.get_lock(shared)
+        if not lk or lk.get("expired"):
+            return True, "Host lock released."
+        lk_key = str(lk.get("project_key", "") or "").strip()
+        if lk_key and pkey and lk_key != pkey:
+            return False, "Lock belongs to another project key."
+        owner = str(lk.get("owner_node_id", "") or "").strip()
+        if owner and owner == get_local_node_id():
+            return True, "Lock migrated to this node."
+        time.sleep(0.7)
+    return False, "Timed out waiting for host lock release."
 
 
 def post_local_host_action(action: str) -> tuple[bool, str]:
@@ -613,6 +716,30 @@ def _normalize_config_dict(raw_cfg: dict | None) -> dict:
         cfg["max_players"] = 20
     cfg["max_players"] = max(1, min(500, cfg["max_players"]))
     cfg["whitelist_enabled"] = bool(cfg.get("whitelist_enabled", False))
+    cfg["auto_accept_pending"] = bool(cfg.get("auto_accept_pending", True))
+    cfg["auto_host_switch"] = bool(cfg.get("auto_host_switch", True))
+    cfg["auto_self_heal_syncthing"] = bool(cfg.get("auto_self_heal_syncthing", True))
+    cfg["allowed_syncthing_devices"] = sorted(_normalized_device_ids_from_cfg(cfg))
+    meta_raw = cfg.get("allowed_syncthing_devices_meta", {})
+    meta_clean: dict[str, dict] = {}
+    if isinstance(meta_raw, dict):
+        for did, row in meta_raw.items():
+            dev = str(did or "").strip()
+            if not dev or dev not in cfg["allowed_syncthing_devices"]:
+                continue
+            if not isinstance(row, dict):
+                row = {}
+            ts = float(row.get("last_seen_ts", row.get("added_ts", time.time())) or time.time())
+            meta_clean[dev] = {
+                "added_ts": float(row.get("added_ts", ts) or ts),
+                "last_seen_ts": ts,
+                "source": str(row.get("source", "unknown") or "unknown"),
+            }
+    now_ts = time.time()
+    for did in cfg["allowed_syncthing_devices"]:
+        if did not in meta_clean:
+            meta_clean[did] = {"added_ts": now_ts, "last_seen_ts": now_ts, "source": "legacy"}
+    cfg["allowed_syncthing_devices_meta"] = meta_clean
     cfg["wizard_completed"] = bool(cfg.get("wizard_completed", False))
     return cfg
 
@@ -746,6 +873,10 @@ runtime_health = {
     "last_finalize_result": "",
     "last_cleanup_time": "",
     "last_cleanup_removed": "",
+    "last_auto_accept": "",
+    "last_self_heal": "",
+    "last_automation_event": "",
+    "automation_events": [],
 }
 last_player_poll = 0.0
 last_player_stats_poll = 0.0
@@ -763,14 +894,29 @@ STATUS_TTL_SYNC_PENDING_S = 10.0
 STATUS_TTL_SETUP_STATE_S = 12.0
 STATUS_TTL_BACKUPS_S = 20.0
 STATUS_TTL_LOCK_INFO_S = 1.2
+T = TypeVar("T")
 
 
-def _cached_value(cache_key: str, ttl_s: float, loader):
+def _log_automation_event(message: str, level: str = "info") -> None:
+    msg = str(message or "").strip()
+    if not msg:
+        return
+    ts = datetime.now().strftime("%H:%M:%S")
+    entry = f"[{ts}] {str(level).upper()}: {msg}"
+    runtime_health["last_automation_event"] = entry
+    events = runtime_health.get("automation_events")
+    if not isinstance(events, list):
+        events = []
+    events.append(entry)
+    runtime_health["automation_events"] = events[-20:]
+
+
+def _cached_value(cache_key: str, ttl_s: float, loader: Callable[[], T]) -> T:
     now = time.time()
     with status_cache_lock:
         entry = status_cache.get(cache_key)
         if entry and (now - float(entry.get("ts", 0.0))) < ttl_s:
-            return entry.get("value")
+            return cast(T, entry.get("value"))
     value = loader()
     with status_cache_lock:
         status_cache[cache_key] = {"ts": now, "value": value}
@@ -785,6 +931,10 @@ def _clear_status_cache(prefix: str | None = None) -> None:
         for key in list(status_cache.keys()):
             if key.startswith(prefix):
                 status_cache.pop(key, None)
+
+
+def _as_dict(value: object | None) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
 
 def parse_ram_to_mb(ram_value: str) -> int | None:
     try:
@@ -821,7 +971,7 @@ def get_system_metrics(server_dir: str = ""):
         cpus = os.cpu_count() or 1
         loadavg_fn = getattr(os, "getloadavg", None)
         if platform.system() != "Windows" and callable(loadavg_fn):
-            loads = loadavg_fn()
+            loads = cast(tuple[float, float, float], loadavg_fn())
             load1 = float(loads[0]) if loads else 0.0
             cpu_pct = int(min(100, max(0, (load1 / cpus) * 100)))
         elif psutil is not None:
@@ -1092,98 +1242,269 @@ def get_setup_state(cfg) -> tuple[bool, str]:
 
 
 def build_connectivity_diagnostics(cfg):
-    shared_dir = normalize_path_value(cfg.get("shared_dir", ""))
-    server_dir = normalize_path_value(cfg.get("server_dir", ""))
+    shared_raw = str(cfg.get("shared_dir", "") or "").strip()
+    server_raw = str(cfg.get("server_dir", "") or "").strip()
+    shared_dir = normalize_path_value(shared_raw)
+    server_dir = normalize_path_value(server_raw)
     setup_ok, setup_msg = get_setup_state(cfg)
     pkey = ensure_project_key(cfg)
     shared_marker = Path(shared_dir) / ".mc_project_key" if shared_dir else None
     autoconfig = Path(shared_dir) / ".mc_autoconfig.json" if shared_dir else None
-    lock = lock_manager.get_lock(shared_dir) if shared_dir else None
-    syn_health = st_api.get_health("mc-shared")
+    lock = _as_dict(lock_manager.get_lock(shared_dir) if shared_dir else None)
+    syn_health = _as_dict(st_api.get_health("mc-shared"))
+    world_dir = resolve_world_folder(cfg, allow_server_fallback=True, create_shared_world=False)
+    allow = _normalized_device_ids_from_cfg(cfg)
+    trusted_meta = _trusted_device_meta_from_cfg(cfg)
 
-    items = []
+    items: list[dict[str, Any]] = []
 
-    def add(name, status, detail, fix=""):
-        items.append({
+    def add(
+        check_id: str,
+        name: str,
+        status: str,
+        detail: str,
+        fix: str = "",
+        data: dict[str, Any] | None = None,
+    ):
+        row: dict[str, Any] = {
+            "id": check_id,
             "name": name,
             "status": status,  # pass / warn / fail
             "detail": detail,
             "fix": fix,
-        })
+        }
+        if data:
+            row["data"] = data
+        items.append(row)
+
+    # Path style mismatches are a top source of confusing setup states.
+    if _path_style_mismatch_for_os(server_raw):
+        add(
+            "path_server_style",
+            "Server Path Format",
+            "fail",
+            f"Server path uses another OS format: {server_raw}",
+            "Use a local folder path for this machine (Linux path on Linux, drive path on Windows).",
+        )
+    if _path_style_mismatch_for_os(shared_raw):
+        add(
+            "path_shared_style",
+            "Shared Path Format",
+            "fail",
+            f"Shared path uses another OS format: {shared_raw}",
+            "Set synced shared folder path in local OS format.",
+        )
 
     if not shared_dir:
-        add("Shared Folder", "fail", "Shared folder path is not configured.", "Set Shared Folder in setup/options.")
+        add("shared_missing", "Shared Folder", "fail", "Shared folder path is not configured.", "Set Shared Folder in setup/options.")
     elif not Path(shared_dir).exists():
-        add("Shared Folder", "fail", f"Shared folder does not exist: {shared_dir}", "Set a valid synced folder path.")
+        add("shared_missing_fs", "Shared Folder", "fail", f"Shared folder does not exist: {shared_dir}", "Set a valid synced folder path.")
     else:
-        add("Shared Folder", "pass", f"Using: {shared_dir}")
+        add("shared_ok", "Shared Folder", "pass", f"Using: {shared_dir}")
 
     if not server_dir:
-        add("Server Folder", "warn", "Server folder is not configured yet.", "Set Server Folder path on this PC.")
+        add("server_missing", "Server Folder", "warn", "Server folder is not configured yet.", "Set Server Folder path on this PC.")
     elif not Path(server_dir).exists():
-        add("Server Folder", "fail", f"Server folder does not exist: {server_dir}", "Set a valid local server path.")
+        add("server_missing_fs", "Server Folder", "fail", f"Server folder does not exist: {server_dir}", "Set a valid local server path.")
     else:
-        add("Server Folder", "pass", f"Using: {server_dir}")
+        add("server_ok", "Server Folder", "pass", f"Using: {server_dir}")
+
+    if server_dir and shared_dir:
+        try:
+            if Path(server_dir).resolve() == Path(shared_dir).resolve():
+                add(
+                    "path_same",
+                    "Folder Isolation",
+                    "fail",
+                    "Server folder and shared folder are the same path.",
+                    "Use separate folders to prevent sync/corruption issues.",
+                )
+        except Exception:
+            pass
+
+    if server_dir and Path(server_dir).exists() and Path(server_dir).is_dir():
+        server = Path(server_dir)
+        run_scripts = [p.name for p in (server / "run.sh", server / "run.bat", server / "start.bat") if p.exists()]
+        jar_name = str(cfg.get("server_jar", "server.jar")).strip() or "server.jar"
+        jars = sorted([p.name for p in server.glob("*.jar") if p.is_file()])
+        if run_scripts:
+            add("server_boot_entry", "Server Boot Entry", "pass", f"Run script found: {', '.join(run_scripts)}")
+        elif (server / jar_name).exists():
+            add("server_boot_entry", "Server Boot Entry", "pass", f"Configured jar found: {jar_name}")
+        elif jars:
+            add(
+                "server_jar_mismatch",
+                "Server Boot Entry",
+                "warn",
+                f"Configured jar '{jar_name}' not found. Available jars: {', '.join(jars[:8])}",
+                "Open Options and select correct server jar, or run Auto Fix.",
+            )
+        else:
+            add("server_no_jar", "Server Boot Entry", "fail", "No .jar file found in server folder.", "Add server jar files or point to correct server folder.")
 
     if pkey:
-        add("Project Key", "pass", f"Key loaded: {pkey[:8]}...")
+        add("project_key_ok", "Project Key", "pass", f"Key loaded: {pkey[:8]}...", data={"prefix": pkey[:8]})
     else:
-        add("Project Key", "fail", "Project key missing.", "Run Auto Fix or save settings again.")
+        add("project_key_missing", "Project Key", "fail", "Project key missing.", "Run Auto Fix or save settings again.")
 
+    marker_key = ""
     if shared_marker and shared_marker.exists():
         try:
-            mk = shared_marker.read_text(encoding="utf-8", errors="replace").strip()
-            if mk and mk == pkey:
-                add("Shared Key Marker", "pass", ".mc_project_key is synced and matches.")
+            marker_key = shared_marker.read_text(encoding="utf-8", errors="replace").strip()
+            if marker_key and marker_key == pkey:
+                add("marker_ok", "Shared Key Marker", "pass", ".mc_project_key is synced and matches.")
             else:
-                add("Shared Key Marker", "warn", ".mc_project_key exists but mismatched/empty.", "Run Auto Fix on both PCs.")
+                add(
+                    "marker_mismatch",
+                    "Shared Key Marker",
+                    "warn",
+                    f".mc_project_key exists but mismatched/empty (marker={marker_key[:8] if marker_key else 'empty'}).",
+                    "Run Auto Fix on both PCs to resync project key marker.",
+                )
         except Exception:
-            add("Shared Key Marker", "warn", ".mc_project_key could not be read.", "Check folder permissions.")
+            add("marker_read_fail", "Shared Key Marker", "warn", ".mc_project_key could not be read.", "Check folder permissions.")
     else:
-        add("Shared Key Marker", "warn", ".mc_project_key not found in shared folder.", "Run Auto Fix to generate/sync it.")
+        add("marker_missing", "Shared Key Marker", "warn", ".mc_project_key not found in shared folder.", "Run Auto Fix to generate/sync it.")
 
     if autoconfig and autoconfig.exists():
-        add("Shared Auto Config", "pass", ".mc_autoconfig.json present.")
+        add("autoconfig_ok", "Shared Auto Config", "pass", ".mc_autoconfig.json present.")
     else:
-        add("Shared Auto Config", "warn", ".mc_autoconfig.json missing.", "Save settings once or run Auto Fix.")
+        add("autoconfig_missing", "Shared Auto Config", "warn", ".mc_autoconfig.json missing.", "Save settings once or run Auto Fix.")
+
+    if world_dir and world_dir.exists():
+        add("world_detected", "World Folder", "pass", f"Resolved world folder: {world_dir}")
+    else:
+        add("world_missing", "World Folder", "warn", "No world folder detected yet.", "Start once, or set world path manually in Access settings.")
 
     if lock:
         ex = "expired" if lock.get("expired") else "active"
         lk = str(lock.get("project_key", "") or "").strip()
+        owner_node = str(lock.get("owner_node_id", "") or "").strip()
+        host_ui = str(lock.get("ui_url", "") or "").strip()
+        host_name = str(lock.get("host", "?") or "?")
         if lk and lk != pkey:
-            add("Host Lock", "warn", f"Lock exists ({ex}) but belongs to different project key.", "Use correct shared folder/project.")
+            add(
+                "lock_key_mismatch",
+                "Host Lock",
+                "fail",
+                f"Lock exists ({ex}) but belongs to another project key.",
+                "Do not start. Verify correct shared folder/project key.",
+                data={"host": host_name, "owner_node_id": owner_node, "ui_url": host_ui},
+            )
+        elif lock.get("expired"):
+            add(
+                "lock_expired",
+                "Host Lock",
+                "warn",
+                f"Expired lock by {host_name}.",
+                "Run Auto Fix to clear expired lock if no host is actually running.",
+                data={"owner_node_id": owner_node, "ui_url": host_ui},
+            )
         else:
-            add("Host Lock", "pass" if not lock.get("expired") else "warn", f"Lock by {lock.get('host','?')} ({ex}).")
+            add(
+                "lock_active",
+                "Host Lock",
+                "pass",
+                f"Active lock by {host_name}.",
+                data={"owner_node_id": owner_node, "ui_url": host_ui},
+            )
     else:
-        add("Host Lock", "warn", "No active host lock found.", "Normal if no one is hosting.")
+        add("lock_none", "Host Lock", "warn", "No active host lock found.", "Normal if no one is hosting.")
 
     if not syn_health.get("running"):
-        add("Syncthing", "fail", "Syncthing is not running.", "Start Syncthing and accept pending requests.")
+        add("syncthing_down", "Syncthing Core", "fail", "Syncthing is not running.", "Start Syncthing and accept pending requests.")
     else:
+        my_id = str(syn_health.get("my_id", "") or "").strip()
         peers = int(syn_health.get("connected_peers", 0) or 0)
+        add(
+            "syncthing_core_ok",
+            "Syncthing Core",
+            "pass",
+            f"Syncthing running. Peers connected: {peers}.",
+            data={"my_id_prefix": my_id[:8] if my_id else ""},
+        )
+
         fexists = bool(syn_health.get("folder_exists"))
         paused = bool(syn_health.get("folder_paused"))
+        local_busy = bool(mc_server.is_running() or is_task_running())
         if not fexists:
-            add("Syncthing Folder", "warn", "mc-shared folder not ensured yet.", "Run Auto Fix or accept folder in Syncthing UI.")
-        elif paused:
-            add("Syncthing Folder", "warn", "Folder is paused.", "Resume folder in Syncthing.")
+            add("syncthing_folder_missing", "Syncthing Folder", "warn", "mc-shared folder not ensured yet.", "Run Auto Fix or accept folder in Syncthing UI.")
+        elif paused and not local_busy:
+            add("syncthing_paused_idle", "Syncthing Folder", "warn", "Folder is paused while host is idle.", "Run Auto Fix to auto-resume.")
+        elif paused and local_busy:
+            add("syncthing_paused_busy", "Syncthing Folder", "pass", "Folder paused intentionally during host activity.")
         else:
-            add("Syncthing Folder", "pass", f"Folder active. Connected peers: {peers}.")
+            add("syncthing_folder_ok", "Syncthing Folder", "pass", f"Folder active. Connected peers: {peers}.")
+
+        pending = int(st_api.get_pending_count("mc-shared") or 0)
+        if pending > 0:
+            add("syncthing_pending", "Sync Pending", "warn", f"{pending} pending item(s) waiting sync/accept.", "Run Sync Now / Auto Fix.")
+        else:
+            add("syncthing_pending_ok", "Sync Pending", "pass", "No pending sync items.")
+
+        if bool(cfg.get("auto_accept_pending", True)):
+            if allow:
+                stale = 0
+                now = time.time()
+                for did in allow:
+                    row = trusted_meta.get(did, {})
+                    last_seen = float(row.get("last_seen_ts", row.get("added_ts", now)) or now)
+                    if (now - last_seen) > TRUST_DEVICE_TTL_S:
+                        stale += 1
+                if stale > 0:
+                    add(
+                        "auto_accept_stale",
+                        "Auto Accept Guard",
+                        "warn",
+                        f"Trusted devices: {len(allow)} (stale: {stale}).",
+                        "Run Auto Fix to prune stale devices and refresh trust.",
+                    )
+                else:
+                    add("auto_accept_ok", "Auto Accept Guard", "pass", f"Auto-accept enabled with {len(allow)} trusted device(s).")
+            else:
+                add("auto_accept_empty", "Auto Accept Guard", "warn", "Auto-accept enabled but trusted device list is empty.", "Use Join Code first to trust host device.")
+        else:
+            add("auto_accept_disabled", "Auto Accept Guard", "warn", "Auto-accept disabled.", "Enable auto_accept_pending in config if needed.")
+
+    if bool(cfg.get("auto_host_switch", True)):
+        add("auto_host_switch_on", "Auto Host Switch", "pass", "Enabled (start on this PC can migrate host safely).")
+    else:
+        add("auto_host_switch_off", "Auto Host Switch", "warn", "Disabled.", "Enable auto_host_switch for easier multi-PC host transfer.")
+
+    if bool(cfg.get("auto_self_heal_syncthing", True)):
+        add("auto_heal_on", "Syncthing Self-Heal", "pass", "Enabled.")
+    else:
+        add("auto_heal_off", "Syncthing Self-Heal", "warn", "Disabled.", "Enable auto_self_heal_syncthing for auto recovery.")
+
+    java_path = shutil.which("java") or ""
+    if java_path:
+        add("java_ok", "Java Runtime", "pass", f"Java detected: {java_path}")
+    else:
+        add("java_missing", "Java Runtime", "fail", "Java is not available in PATH.", "Install Java and restart app.")
 
     if setup_ok:
-        add("Setup State", "pass", "Setup looks valid on this machine.")
+        add("setup_ok", "Setup State", "pass", "Setup looks valid on this machine.")
     else:
-        add("Setup State", "warn", setup_msg or "Setup incomplete.", "Run wizard Auto Fix or complete missing paths.")
+        add("setup_warn", "Setup State", "warn", setup_msg or "Setup incomplete.", "Run wizard Auto Fix or complete missing paths.")
 
     counts = {
         "pass": sum(1 for i in items if i["status"] == "pass"),
         "warn": sum(1 for i in items if i["status"] == "warn"),
         "fail": sum(1 for i in items if i["status"] == "fail"),
     }
+    quick_fixes: list[str] = []
+    for row in items:
+        if row.get("status") in ("fail", "warn"):
+            fx = str(row.get("fix", "") or "").strip()
+            if fx and fx not in quick_fixes:
+                quick_fixes.append(fx)
+    summary = f"{counts['fail']} fail, {counts['warn']} warn, {counts['pass']} pass"
     return {
         "ok": counts["fail"] == 0,
         "counts": counts,
+        "summary": summary,
         "items": items,
+        "quick_fixes": quick_fixes[:8],
     }
 
 
@@ -1357,6 +1678,360 @@ def load_shared_autoconfig(shared_dir: str) -> dict:
         return {}
 
 
+JOIN_CODE_PREFIX = "MC-HOST://"
+
+
+def _encode_join_code(payload: dict) -> str:
+    raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    token = base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+    return f"{JOIN_CODE_PREFIX}{token}"
+
+
+def _decode_join_code(code_text: str) -> dict:
+    raw = str(code_text or "").strip()
+    if not raw:
+        raise ValueError("Join code is empty.")
+    if raw.upper().startswith(JOIN_CODE_PREFIX):
+        raw = raw[len(JOIN_CODE_PREFIX):].strip()
+    raw = raw.replace(" ", "")
+    if not raw:
+        raise ValueError("Join code token is empty.")
+    padded = raw + ("=" * ((4 - len(raw) % 4) % 4))
+    try:
+        decoded = base64.urlsafe_b64decode(padded.encode("ascii"))
+        data = json.loads(decoded.decode("utf-8", errors="replace"))
+    except Exception:
+        raise ValueError("Join code format is invalid.")
+    if not isinstance(data, dict):
+        raise ValueError("Join code payload is invalid.")
+    version = int(data.get("v", 0) or 0)
+    if version != 1:
+        raise ValueError("Unsupported join code version.")
+    key = str(data.get("project_key", "") or "").strip()
+    if not key:
+        raise ValueError("Join code missing project key.")
+    return data
+
+
+def make_join_code_payload(cfg) -> dict:
+    key = str(cfg.get("project_key", "") or "").strip() or ensure_project_key(cfg)
+    shared = normalize_path_value(cfg.get("shared_dir", ""))
+    shared_name = Path(shared).name if shared else "mc-shared"
+    return {
+        "v": 1,
+        "project_key": key,
+        "project_name": str(cfg.get("project_name", "Minecraft Server") or "Minecraft Server"),
+        "server_jar": str(cfg.get("server_jar", "server.jar") or "server.jar"),
+        "ram": str(cfg.get("ram", "4G") or "4G"),
+        "max_players": int(cfg.get("max_players", 20) or 20),
+        "whitelist_enabled": bool(cfg.get("whitelist_enabled", False)),
+        "syncthing_id": str(st_api.get_my_id() or ""),
+        "shared_name": shared_name,
+        "host_user": load_local_user(),
+        "host_node_id": get_local_node_id(),
+        "generated_at": datetime.now().isoformat(),
+    }
+
+
+def _pick_shared_dir_for_join(cfg, hinted_name: str, requested_path: str = "") -> str:
+    requested = normalize_path_value(requested_path)
+    if requested:
+        return requested
+    existing = normalize_path_value(cfg.get("shared_dir", ""))
+    if existing:
+        return existing
+    hint = str(hinted_name or "").strip() or "mc-shared"
+    home = Path.home()
+    candidates = [
+        home / hint,
+        home / "mc-shared",
+        home / "Sync",
+        home / "Syncthing",
+    ]
+    for c in candidates:
+        try:
+            if c.exists() and c.is_dir():
+                return str(c)
+        except Exception:
+            continue
+    # fallback: create a stable default
+    return str(home / hint)
+
+
+def apply_join_code(cfg, code_text: str, requested_shared_dir: str = "", requested_server_dir: str = "") -> dict:
+    data = _decode_join_code(code_text)
+    join_key = str(data.get("project_key", "") or "").strip()
+    shared_dir = _pick_shared_dir_for_join(cfg, str(data.get("shared_name", "") or ""), requested_shared_dir)
+    shared = Path(shared_dir).expanduser()
+    ensure_shared_layout(shared)
+
+    marker = shared / ".mc_project_key"
+    if marker.exists():
+        marker_key = marker.read_text(encoding="utf-8", errors="replace").strip()
+        if marker_key and marker_key != join_key:
+            return {
+                "ok": False,
+                "msg": f"Shared folder already belongs to another project key: {shared}",
+                "shared_dir": str(shared),
+            }
+
+    cfg["shared_dir"] = str(shared)
+    cfg["project_key"] = join_key
+    incoming_name = str(data.get("project_name", "") or "").strip()
+    if incoming_name:
+        cfg["project_name"] = incoming_name
+    incoming_jar = str(data.get("server_jar", "") or "").strip()
+    if incoming_jar:
+        cfg["server_jar"] = incoming_jar
+    incoming_ram = str(data.get("ram", "") or "").strip()
+    if incoming_ram:
+        cfg["ram"] = incoming_ram
+    try:
+        cfg["max_players"] = max(1, min(500, int(data.get("max_players", cfg.get("max_players", 20)) or 20)))
+    except Exception:
+        cfg["max_players"] = max(1, min(500, int(cfg.get("max_players", 20) or 20)))
+    cfg["whitelist_enabled"] = bool(data.get("whitelist_enabled", cfg.get("whitelist_enabled", False)))
+
+    server_dir_req = normalize_path_value(requested_server_dir)
+    if server_dir_req:
+        cfg["server_dir"] = server_dir_req
+    if not normalize_path_value(cfg.get("server_dir", "")):
+        guessed = _guess_local_server_dir(cfg)
+        if guessed:
+            cfg["server_dir"] = guessed
+        else:
+            default_server = Path.home() / "mc-server"
+            default_server.mkdir(parents=True, exist_ok=True)
+            cfg["server_dir"] = str(default_server)
+
+    cfg["wizard_completed"] = True
+    save_config(cfg)
+
+    # persist marker + shared config
+    marker.write_text(join_key, encoding="utf-8")
+    ensure_project_key(cfg)
+    write_shared_autoconfig(cfg)
+
+    ensure_syncthing_binary()
+    syn_running = ensure_syncthing_running(timeout_s=5.0)
+    folder_ensured = st_api.ensure_folder(shared) if syn_running else False
+
+    peer_added = False
+    peer_id = str(data.get("syncthing_id", "") or "").strip()
+    if peer_id:
+        _remember_allowed_syncthing_device(cfg, peer_id)
+    if syn_running and folder_ensured and peer_id:
+        try:
+            peer_added = bool(st_api.ensure_device_for_folder(peer_id, "mc-shared", str(data.get("host_user", "MC Host") or "MC Host")))
+        except Exception:
+            peer_added = False
+    _clear_status_cache()
+
+    msg = "Join code applied."
+    if not syn_running:
+        msg += " Syncthing is not running yet."
+    elif not folder_ensured:
+        msg += " Syncthing folder ensure pending; accept folder/device in Syncthing UI."
+    elif peer_id and not peer_added:
+        msg += " Peer add pending; host may need to accept device in Syncthing UI once."
+
+    return {
+        "ok": True,
+        "msg": msg,
+        "shared_dir": str(shared),
+        "server_dir": str(cfg.get("server_dir", "")),
+        "project_key": join_key,
+        "syncthing_running": bool(syn_running),
+        "folder_ensured": bool(folder_ensured),
+        "peer_added": bool(peer_added),
+        "host_syncthing_id": peer_id,
+    }
+
+
+def _normalized_device_ids_from_cfg(cfg) -> set[str]:
+    out: set[str] = set()
+    raw = cfg.get("allowed_syncthing_devices", [])
+    if isinstance(raw, (list, tuple, set)):
+        for row in raw:
+            did = str(row or "").strip()
+            if did:
+                out.add(did)
+    return out
+
+
+def _trusted_device_meta_from_cfg(cfg) -> dict[str, dict]:
+    raw = cfg.get("allowed_syncthing_devices_meta", {})
+    out: dict[str, dict] = {}
+    if isinstance(raw, dict):
+        for did, row in raw.items():
+            dev = str(did or "").strip()
+            if not dev:
+                continue
+            if not isinstance(row, dict):
+                row = {}
+            try:
+                added_ts = float(row.get("added_ts", time.time()) or time.time())
+            except Exception:
+                added_ts = time.time()
+            try:
+                last_seen_ts = float(row.get("last_seen_ts", added_ts) or added_ts)
+            except Exception:
+                last_seen_ts = added_ts
+            out[dev] = {
+                "added_ts": added_ts,
+                "last_seen_ts": last_seen_ts,
+                "source": str(row.get("source", "unknown") or "unknown"),
+            }
+    return out
+
+
+def _save_trusted_device_state(cfg, allow: set[str], meta: dict[str, dict]) -> None:
+    cfg["allowed_syncthing_devices"] = sorted({str(d or "").strip() for d in allow if str(d or "").strip()})
+    keep = set(cfg["allowed_syncthing_devices"])
+    cfg["allowed_syncthing_devices_meta"] = {k: v for k, v in meta.items() if k in keep}
+    save_config(cfg)
+
+
+def _touch_trusted_device(cfg, device_id: str, source: str = "unknown") -> bool:
+    did = str(device_id or "").strip()
+    if not did:
+        return False
+    allow = _normalized_device_ids_from_cfg(cfg)
+    meta = _trusted_device_meta_from_cfg(cfg)
+    now = time.time()
+    row = meta.get(did, {"added_ts": now, "last_seen_ts": now, "source": source})
+    row["last_seen_ts"] = now
+    if not row.get("added_ts"):
+        row["added_ts"] = now
+    if source:
+        row["source"] = source
+    meta[did] = row
+    changed = did not in allow
+    allow.add(did)
+    _save_trusted_device_state(cfg, allow, meta)
+    return changed
+
+
+def _prune_stale_trusted_devices(cfg, max_age_s: float = TRUST_DEVICE_TTL_S) -> int:
+    allow = _normalized_device_ids_from_cfg(cfg)
+    meta = _trusted_device_meta_from_cfg(cfg)
+    now = time.time()
+    removed = 0
+    for did in list(allow):
+        row = meta.get(did, {})
+        last_seen = float(row.get("last_seen_ts", row.get("added_ts", now)) or now)
+        if (now - last_seen) > float(max_age_s):
+            allow.discard(did)
+            meta.pop(did, None)
+            removed += 1
+    if removed:
+        _save_trusted_device_state(cfg, allow, meta)
+    return removed
+
+
+def _refresh_trusted_devices_from_presence(cfg) -> int:
+    shared = normalize_path_value(cfg.get("shared_dir", ""))
+    if not shared:
+        return 0
+    pkey = str(cfg.get("project_key", "") or "").strip() or ensure_project_key(cfg)
+    pdir = _presence_dir(shared)
+    if not pdir.exists() or not pdir.is_dir():
+        return 0
+    allow = _normalized_device_ids_from_cfg(cfg)
+    meta = _trusted_device_meta_from_cfg(cfg)
+    now = time.time()
+    touched = 0
+    for f in pdir.glob("*.json"):
+        row = _read_json_safe(f)
+        if not isinstance(row, dict):
+            continue
+        row_key = str(row.get("project_key", "") or "").strip()
+        if pkey and row_key and row_key != pkey:
+            continue
+        did = str(row.get("syncthing_id", "") or "").strip()
+        if not did:
+            continue
+        # Strict guard: presence can refresh known trusted devices only.
+        # New devices must first enter allowlist via explicit join-code trust.
+        if did not in allow:
+            continue
+        touched += 1
+        row_meta = meta.get(did, {"added_ts": now, "last_seen_ts": now, "source": "presence"})
+        row_meta["last_seen_ts"] = now
+        row_meta["source"] = "presence"
+        if not row_meta.get("added_ts"):
+            row_meta["added_ts"] = now
+        meta[did] = row_meta
+    if touched:
+        _save_trusted_device_state(cfg, allow, meta)
+    return touched
+
+
+def _remember_allowed_syncthing_device(cfg, device_id: str) -> None:
+    _touch_trusted_device(cfg, device_id, source="join_code")
+
+
+def auto_accept_syncthing_pending(cfg) -> dict:
+    """Try to auto-accept pending Syncthing requests under safe guards."""
+    result = {
+        "ok": False,
+        "msg": "",
+        "changed": False,
+        "accepted_devices": 0,
+        "accepted_folders": 0,
+        "pending_devices": 0,
+        "pending_folders": 0,
+    }
+    if not bool(cfg.get("auto_accept_pending", True)):
+        result["msg"] = "Auto-accept disabled in config."
+        return result
+    shared = normalize_path_value(cfg.get("shared_dir", ""))
+    if not shared:
+        result["msg"] = "Shared folder not configured."
+        return result
+    pkey = str(cfg.get("project_key", "") or "").strip() or ensure_project_key(cfg)
+    marker = Path(shared) / ".mc_project_key"
+    try:
+        if marker.exists():
+            mk = marker.read_text(encoding="utf-8", errors="replace").strip()
+            if mk and pkey and mk != pkey:
+                result["msg"] = "Shared marker key mismatch. Auto-accept blocked."
+                return result
+    except Exception:
+        pass
+
+    # Keep trusted device list fresh and bounded over time.
+    try:
+        _refresh_trusted_devices_from_presence(cfg)
+    except Exception:
+        pass
+    removed = 0
+    try:
+        removed = _prune_stale_trusted_devices(cfg, TRUST_DEVICE_TTL_S)
+    except Exception:
+        removed = 0
+
+    allow = _normalized_device_ids_from_cfg(cfg)
+    if not allow:
+        result["msg"] = "No trusted Syncthing devices in allowlist yet."
+        return result
+    st_res = st_api.auto_accept_pending(shared, "mc-shared", allow)
+    result.update(st_res if isinstance(st_res, dict) else {})
+    if result.get("ok"):
+        if result.get("changed"):
+            _clear_status_cache("syn:")
+            _clear_status_cache("sync:")
+            _clear_status_cache("status")
+        result["msg"] = (
+            f"Auto-accept: +{int(result.get('accepted_devices', 0))} devices, +{int(result.get('accepted_folders', 0))} folders."
+        )
+        if removed:
+            result["msg"] += f" Pruned {removed} stale trusted device(s)."
+    else:
+        result["msg"] = result.get("msg") or "Auto-accept did not run."
+    return result
+
+
 def _guess_local_server_dir(cfg) -> str:
     """Best-effort local server path guess for setup automation."""
     current = normalize_path_value(cfg.get("server_dir", ""))
@@ -1463,6 +2138,133 @@ def _select_best_server_jar(server_dir: str, preferred_jar: str) -> str:
 
     jars.sort(key=lambda j: (score(j), -len(j)), reverse=True)
     return jars[0]
+
+
+def _guess_shared_dir(cfg) -> str:
+    current = normalize_path_value(cfg.get("shared_dir", ""))
+    manual = normalize_path_value(cfg.get("manual_shared_dir", ""))
+    for raw in (manual, current):
+        if raw:
+            p = Path(raw).expanduser()
+            if p.exists() and p.is_dir():
+                return str(p)
+
+    home = Path.home()
+    candidates = [
+        home / "mc-shared",
+        home / "Sync",
+        home / "syncthing",
+        home / "Syncthing",
+        home / "Documents/Sync",
+        home / "Desktop/Sync",
+    ]
+
+    prism_root = home / ".local/share/PrismLauncher/instances"
+    if prism_root.exists() and prism_root.is_dir():
+        try:
+            for inst in prism_root.iterdir():
+                if inst.is_dir():
+                    candidates.append(inst / "Sync")
+        except Exception:
+            pass
+
+    # Prefer folders that already look like a shared project.
+    scored: list[tuple[int, str]] = []
+    for p in candidates:
+        try:
+            if not p.exists() or not p.is_dir():
+                continue
+            sc = 0
+            if (p / ".mc_project_key").exists():
+                sc += 100
+            if (p / ".mc_autoconfig.json").exists():
+                sc += 70
+            if (p / ".mc_control").exists():
+                sc += 45
+            if (p / "world_latest").exists():
+                sc += 35
+            if (p / "backups").exists():
+                sc += 25
+            name = p.name.lower()
+            if "sync" in name or "shared" in name:
+                sc += 18
+            scored.append((sc, str(p)))
+        except Exception:
+            continue
+    if scored:
+        scored.sort(key=lambda t: t[0], reverse=True)
+        if scored[0][0] >= 20:
+            return scored[0][1]
+    return str(home / "mc-shared")
+
+
+def bootstrap_first_run_auto_setup() -> dict:
+    """
+    One-time best-effort auto setup to reduce first-run manual steps.
+    Does not start hosting; only normalizes local config and folders.
+    """
+    cfg = load_config(force=True)
+    changed = False
+    actions: list[str] = []
+
+    if not normalize_path_value(cfg.get("shared_dir", "")):
+        cfg["shared_dir"] = _guess_shared_dir(cfg)
+        changed = True
+        actions.append("Auto-selected shared folder.")
+    shared = normalize_path_value(cfg.get("shared_dir", ""))
+    if shared:
+        try:
+            ensure_shared_layout(shared)
+            actions.append("Ensured shared folder layout.")
+        except Exception:
+            pass
+
+    if not normalize_path_value(cfg.get("server_dir", "")):
+        guess = _guess_local_server_dir(cfg)
+        if guess:
+            cfg["server_dir"] = guess
+            changed = True
+            actions.append("Auto-detected server folder.")
+        else:
+            fallback = Path.home() / "mc-server"
+            try:
+                fallback.mkdir(parents=True, exist_ok=True)
+                cfg["server_dir"] = str(fallback)
+                changed = True
+                actions.append("Created default local server folder.")
+            except Exception:
+                pass
+
+    if normalize_path_value(cfg.get("server_dir", "")):
+        jar = _select_best_server_jar(
+            normalize_path_value(cfg.get("server_dir", "")),
+            str(cfg.get("server_jar", "server.jar")),
+        )
+        if jar != str(cfg.get("server_jar", "server.jar")):
+            cfg["server_jar"] = jar
+            changed = True
+            actions.append(f"Auto-selected server jar: {jar}.")
+
+    if shared:
+        try:
+            ensure_project_key(cfg)
+            write_shared_autoconfig(cfg)
+        except Exception:
+            pass
+
+    setup_ok, _ = get_setup_state(cfg)
+    if setup_ok and not bool(cfg.get("wizard_completed", False)):
+        cfg["wizard_completed"] = True
+        changed = True
+        actions.append("Marked setup wizard as completed.")
+
+    if changed:
+        save_config(cfg)
+        _clear_status_cache()
+
+    if actions:
+        _log_automation_event(" | ".join(actions[:4]))
+    return {"changed": changed, "actions": actions[:12], "config": cfg}
 
 
 def resolve_world_folder(
@@ -1625,7 +2427,12 @@ def monitor_lock_heartbeat():
         if not mc_server.is_running() and not is_task_running():
             continue
         pkey = ensure_project_key(cfg)
-        ok, msg = lock_manager.refresh_lock(cfg["shared_dir"], load_local_user(), pkey)
+        ok, msg = lock_manager.refresh_lock(
+            cfg["shared_dir"],
+            load_local_user(),
+            pkey,
+            owner_node_id=get_local_node_id(),
+        )
         if not ok:
             runtime_health["last_error"] = f"Lock heartbeat failed: {msg}"
 
@@ -1692,6 +2499,7 @@ def monitor_remote_host_dispatch():
                 "action": action,
                 "ok": bool(ok),
                 "msg": msg,
+                "project_key": pkey,
                 "time": datetime.now().isoformat(),
                 "ts": time.time(),
             }
@@ -1724,6 +2532,106 @@ def monitor_housekeeping():
                 runtime_health["last_cleanup_removed"] = str(removed)
         except Exception:
             pass
+
+
+def monitor_syncthing_auto_accept():
+    """Periodically auto-accept pending Syncthing requests for trusted devices."""
+    while True:
+        time.sleep(AUTO_ACCEPT_INTERVAL_S)
+        try:
+            cfg = load_config()
+            if not bool(cfg.get("auto_accept_pending", True)):
+                continue
+            shared = normalize_path_value(cfg.get("shared_dir", ""))
+            if not shared:
+                continue
+            # Avoid noisy work when Syncthing API is not reachable.
+            if not st_api.is_running_noauth():
+                continue
+            res = auto_accept_syncthing_pending(cfg)
+            if res.get("ok") and (res.get("accepted_devices") or res.get("accepted_folders")):
+                runtime_health["last_auto_accept"] = datetime.now().isoformat()
+        except Exception:
+            pass
+
+
+def monitor_syncthing_self_heal():
+    """Auto-heal Syncthing runtime/folder state with strict throttling."""
+    last_action_ts = 0.0
+    last_scan_ts = 0.0
+    while True:
+        time.sleep(AUTO_HEAL_INTERVAL_S)
+        try:
+            cfg = load_config()
+            if not bool(cfg.get("auto_self_heal_syncthing", True)):
+                continue
+            shared = normalize_path_value(cfg.get("shared_dir", ""))
+            if not shared:
+                continue
+
+            now = time.time()
+            if (now - last_action_ts) < AUTO_HEAL_MIN_GAP_S:
+                continue
+
+            actions: list[str] = []
+            running = st_api.is_running_noauth()
+            if not running:
+                if ensure_syncthing_running(timeout_s=2.8):
+                    running = True
+                    actions.append("Syncthing restarted")
+                else:
+                    continue
+
+            ensured = bool(st_api.ensure_folder(Path(shared)))
+            if not ensured:
+                actions.append("Folder ensure pending")
+
+            with state_lock:
+                session_active = bool(host_session.get("active"))
+            local_busy = bool(session_active or mc_server.is_running() or is_task_running())
+
+            health = _as_dict(st_api.get_health("mc-shared"))
+            paused = health.get("folder_paused")
+            if local_busy and paused is False:
+                if st_api.set_paused("mc-shared", True):
+                    actions.append("Paused sync during host activity")
+            elif (not local_busy) and paused is True:
+                if st_api.set_paused("mc-shared", False):
+                    actions.append("Resumed sync")
+
+            if ensured and not local_busy and (now - last_scan_ts) >= 45.0:
+                if st_api.scan_folder("mc-shared"):
+                    last_scan_ts = now
+                    actions.append("Triggered sync scan")
+
+            # Guard: if another node owns active lock, do not keep rogue local server alive.
+            if mc_server.is_running() and not session_active:
+                lk = lock_manager.get_lock(shared)
+                if lk and not lk.get("expired"):
+                    lk_key = str(lk.get("project_key", "") or "").strip()
+                    my_key = str(cfg.get("project_key", "") or "").strip() or ensure_project_key(cfg)
+                    owner = str(lk.get("owner_node_id", "") or "").strip()
+                    if lk_key and my_key and lk_key == my_key and owner and owner != get_local_node_id():
+                        try:
+                            mc_server.stop()
+                            t_manager.stop()
+                            with state_lock:
+                                host_session["active"] = False
+                                host_session["ready"] = False
+                            actions.append("Stopped rogue local server (remote lock owner active)")
+                        except Exception:
+                            pass
+
+            if actions:
+                runtime_health["last_self_heal"] = datetime.now().isoformat()
+                _log_automation_event(" | ".join(actions[:4]))
+                last_action_ts = now
+                _clear_status_cache("syn:")
+                _clear_status_cache("sync:")
+                _clear_status_cache("status")
+        except Exception:
+            pass
+
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args): pass
@@ -1911,7 +2819,7 @@ class Handler(BaseHTTPRequestHandler):
             ):
                 folder = resolve_world_folder(
                     cfg,
-                    allow_server_fallback=True,
+                    allow_server_fallback=False,
                     create_shared_world=True,
                 )
             elif target == "shared":
@@ -1990,6 +2898,10 @@ class Handler(BaseHTTPRequestHandler):
                 cfg["max_players"] = 20
             cfg["max_players"] = max(1, min(500, cfg["max_players"]))
             cfg["whitelist_enabled"] = bool(cfg.get("whitelist_enabled", False))
+            cfg["auto_accept_pending"] = bool(cfg.get("auto_accept_pending", True))
+            cfg["auto_host_switch"] = bool(cfg.get("auto_host_switch", True))
+            cfg["auto_self_heal_syncthing"] = bool(cfg.get("auto_self_heal_syncthing", True))
+            cfg["allowed_syncthing_devices"] = sorted(_normalized_device_ids_from_cfg(cfg))
             cfg["wizard_completed"] = bool(cfg.get("wizard_completed", False))
 
             warn_messages: list[str] = []
@@ -2023,6 +2935,35 @@ class Handler(BaseHTTPRequestHandler):
                 warn = " | ".join(warn_messages)
             self._json({"ok": True, "warn": warn})
 
+        elif self.path == "/setup/join-code/generate":
+            payload = make_join_code_payload(cfg)
+            self._json(
+                {
+                    "ok": True,
+                    "join_code": _encode_join_code(payload),
+                    "project_key": payload.get("project_key", ""),
+                    "syncthing_id": payload.get("syncthing_id", ""),
+                    "msg": "Join code generated.",
+                }
+            )
+
+        elif self.path == "/setup/join-code/apply":
+            code_text = str(body.get("code", "") or "").strip()
+            shared_dir = str(body.get("shared_dir", "") or "").strip()
+            server_dir = str(body.get("server_dir", "") or "").strip()
+            try:
+                res = apply_join_code(cfg, code_text, shared_dir, server_dir)
+                if res.get("ok"):
+                    aa = auto_accept_syncthing_pending(load_config())
+                    if aa.get("ok") and (aa.get("accepted_devices") or aa.get("accepted_folders")):
+                        res["msg"] = f"{res.get('msg', '')} {aa.get('msg', '')}".strip()
+                    res["auto_accept"] = aa
+                self._json(res)
+            except ValueError as e:
+                self._json({"ok": False, "msg": str(e)})
+            except Exception as e:
+                self._json({"ok": False, "msg": f"Failed to apply join code: {e}"})
+
         elif self.path == "/host/start":
             if not self._is_local_request():
                 self._json({"ok": False, "msg": "Remote host control blocked. Open this app on the machine that should host the server."})
@@ -2047,10 +2988,61 @@ class Handler(BaseHTTPRequestHandler):
                 if ex_key != pkey:
                     self._json({"ok": False, "msg": "This shared folder is locked by a different project key."})
                     return
+                local_node = get_local_node_id()
+                ex_owner = str(existing.get("owner_node_id", "") or "").strip()
+                if ex_owner and ex_owner == local_node:
+                    # Stale local lock from previous crash/exit.
+                    lock_manager.remove_lock(cfg.get("shared_dir", ""))
+                    _log_automation_event("Removed stale local lock before start.", "warn")
+                else:
+                    if bool(cfg.get("auto_host_switch", True)):
+                        target_node = ex_owner or _find_node_for_lock(cfg, existing)
+                        if not target_node:
+                            self._json(
+                                {
+                                    "ok": False,
+                                    "msg": "Another PC is hosting but target node could not be resolved. Open 'Host on Another PC' and stop host there once.",
+                                }
+                            )
+                            return
+                        if not self._migrate_host_here_flow(cfg, target_node):
+                            self._json({"ok": False, "msg": "Another operation is running."})
+                            return
+                        self._json({"ok": True, "msg": "Migrating host to this PC..."})
+                        return
+                    lock_host = str(existing.get("host", "") or "").strip() or "another PC"
+                    self._json({"ok": False, "msg": f"Server is currently hosted by {lock_host}. Enable auto host switch or stop there first."})
+                    return
             if not self._start_host_flow(cfg):
                 self._json({"ok": False, "msg": "Another operation is running."})
                 return
             self._json({"ok": True, "msg": "Starting..."})
+
+        elif self.path == "/host/migrate-here":
+            if not self._is_local_request():
+                self._json({"ok": False, "msg": "Remote host control blocked. Open this app on the machine that should host the server."})
+                return
+            if is_task_running():
+                self._json({"ok": False, "msg": "Another operation is running."})
+                return
+            if mc_server.is_running():
+                self._json({"ok": False, "msg": "Server already running on this PC."})
+                return
+            ok_paths, msg_paths = validate_paths(cfg, require_server=True, require_shared=True)
+            if not ok_paths:
+                self._json({"ok": False, "msg": msg_paths})
+                return
+            target_node_id = str(body.get("target_node_id", "") or "").strip()
+            if not target_node_id:
+                existing = lock_manager.get_lock(cfg.get("shared_dir", "")) if cfg.get("shared_dir") else None
+                target_node_id = _find_node_for_lock(cfg, existing)
+            if not target_node_id:
+                self._json({"ok": False, "msg": "No active remote host target found."})
+                return
+            if not self._migrate_host_here_flow(cfg, target_node_id):
+                self._json({"ok": False, "msg": "Another operation is running."})
+                return
+            self._json({"ok": True, "msg": "Migration started..."})
 
         elif self.path == "/host/stop":
             if not self._is_local_request():
@@ -2288,8 +3280,12 @@ class Handler(BaseHTTPRequestHandler):
             save_config(cfg)
             ensure_project_key(cfg)
             write_shared_autoconfig(cfg)
+            aa = auto_accept_syncthing_pending(cfg)
             _clear_status_cache()
-            self._json({"ok": bool(running and ensured), "server_dir": str(server), "shared_dir": str(shared), "msg": "Quickstart completed" if running and ensured else "Quickstart partial"})
+            msg = "Quickstart completed" if running and ensured else "Quickstart partial"
+            if aa.get("ok") and (aa.get("accepted_devices") or aa.get("accepted_folders")):
+                msg += f" | {aa.get('msg', '')}"
+            self._json({"ok": bool(running and ensured), "server_dir": str(server), "shared_dir": str(shared), "msg": msg, "auto_accept": aa})
 
         elif self.path == "/setup/validate":
             path_val = str(body.get("path", ""))
@@ -2300,7 +3296,14 @@ class Handler(BaseHTTPRequestHandler):
             actions: list[str] = []
             warn_messages: list[str] = []
 
-            shared_in = normalize_path_value(body.get("shared_dir", cfg.get("shared_dir", "")))
+            raw_shared_in = str(body.get("shared_dir", cfg.get("shared_dir", "")) or "").strip()
+            raw_server_in = str(body.get("server_dir", cfg.get("server_dir", "")) or "").strip()
+            if _path_style_mismatch_for_os(raw_shared_in):
+                warn_messages.append("Shared path has wrong OS format. Auto-fix ignored that path and used local fallback.")
+            if _path_style_mismatch_for_os(raw_server_in):
+                warn_messages.append("Server path has wrong OS format. Auto-fix ignored that path and used local fallback.")
+
+            shared_in = normalize_path_value(raw_shared_in)
             manual_shared = normalize_path_value(cfg.get("manual_shared_dir", ""))
             if not shared_in and manual_shared:
                 shared_in = manual_shared
@@ -2310,7 +3313,10 @@ class Handler(BaseHTTPRequestHandler):
                     actions.append("Updated shared folder path.")
                 cfg["shared_dir"] = shared_in
             if not normalize_path_value(cfg.get("shared_dir", "")):
-                self._json({"ok": False, "msg": "Shared folder is required for auto-fix."})
+                cfg["shared_dir"] = _guess_shared_dir(cfg)
+                actions.append("Auto-detected shared folder path.")
+            if not normalize_path_value(cfg.get("shared_dir", "")):
+                self._json({"ok": False, "msg": "Shared folder is required for auto-fix and could not be auto-detected."})
                 return
 
             # Normalize config values first.
@@ -2324,6 +3330,21 @@ class Handler(BaseHTTPRequestHandler):
                 "manual_crash_dir",
             ):
                 cfg[key] = normalize_path_value(cfg.get(key))
+
+            # Repair same-folder misconfiguration automatically.
+            try:
+                sdir = normalize_path_value(cfg.get("server_dir", ""))
+                shdir = normalize_path_value(cfg.get("shared_dir", ""))
+                if sdir and shdir and Path(sdir).resolve() == Path(shdir).resolve():
+                    candidate = normalize_path_value(cfg.get("manual_shared_dir", "")) or _guess_shared_dir(cfg)
+                    if not candidate or candidate == sdir:
+                        candidate = str(Path.home() / "mc-shared")
+                    if Path(candidate).resolve() == Path(sdir).resolve():
+                        candidate = str(Path.home() / "mc-shared-2")
+                    cfg["shared_dir"] = normalize_path_value(candidate)
+                    actions.append("Separated shared folder from server folder.")
+            except Exception:
+                pass
             try:
                 cfg["max_players"] = max(1, min(500, int(cfg.get("max_players", 20))))
             except Exception:
@@ -2374,7 +3395,25 @@ class Handler(BaseHTTPRequestHandler):
             if pkey and pkey != prev_key:
                 actions.append("Synchronized project key.")
 
+            # If marker already exists with another non-empty key, trust shared marker as source of truth.
+            try:
+                marker_file = Path(cfg["shared_dir"]) / ".mc_project_key"
+                if marker_file.exists():
+                    marker_key = marker_file.read_text(encoding="utf-8", errors="replace").strip()
+                    if marker_key and marker_key != pkey:
+                        cfg["project_key"] = marker_key
+                        pkey = marker_key
+                        actions.append("Aligned project key with shared marker.")
+                else:
+                    marker_file.write_text(pkey, encoding="utf-8")
+                    actions.append("Created shared key marker.")
+            except Exception:
+                pass
+
             # Repair/guess local server path.
+            incoming_server = normalize_path_value(raw_server_in)
+            if incoming_server:
+                cfg["server_dir"] = incoming_server
             server_dir = normalize_path_value(cfg.get("server_dir", ""))
             server_ok = bool(server_dir and Path(server_dir).exists() and Path(server_dir).is_dir())
             if not server_ok:
@@ -2417,6 +3456,7 @@ class Handler(BaseHTTPRequestHandler):
             ensure_syncthing_binary()
             running = ensure_syncthing_running(timeout_s=5.0)
             ensured = False
+            aa = {"ok": False}
             if running:
                 try:
                     st_api.refresh_api_key()
@@ -2432,15 +3472,46 @@ class Handler(BaseHTTPRequestHandler):
                     except Exception:
                         pass
                 if ensured:
+                    # Auto-resume if paused while host is idle.
+                    try:
+                        h = _as_dict(st_api.get_health("mc-shared"))
+                        paused = bool(h.get("folder_paused"))
+                        local_busy = bool(mc_server.is_running() or is_task_running())
+                        if paused and not local_busy and st_api.set_paused("mc-shared", False):
+                            actions.append("Resumed paused Syncthing folder.")
+                    except Exception:
+                        pass
                     try:
                         st_api.scan_folder("mc-shared")
                         actions.append("Triggered Syncthing scan for shared folder.")
                     except Exception:
                         pass
+                    # Build trusted allowlist from known project presence first, then auto-accept.
+                    trusted_added = 0
+                    for node in get_remote_nodes(cfg):
+                        did = str(node.get("syncthing_id", "") or "").strip()
+                        if not did:
+                            continue
+                        if _touch_trusted_device(cfg, did, source="presence_autofix"):
+                            trusted_added += 1
+                    if trusted_added:
+                        actions.append(f"Trusted {trusted_added} device(s) from project presence.")
+                    aa = auto_accept_syncthing_pending(cfg)
+                    if aa.get("ok") and (aa.get("accepted_devices") or aa.get("accepted_folders")):
+                        actions.append(aa.get("msg", "Auto-accepted pending requests."))
                 else:
                     warn_messages.append("Syncthing folder not ensured yet. Accept folder/device request in Syncthing UI.")
             else:
                 warn_messages.append("Syncthing is not running. Start it once and keep it in background.")
+
+            # Clear only expired lock to avoid stale-block confusion.
+            try:
+                lk = lock_manager.get_lock(cfg.get("shared_dir", ""))
+                if lk and lk.get("expired"):
+                    lock_manager.remove_lock(cfg.get("shared_dir", ""))
+                    actions.append("Cleared expired host lock.")
+            except Exception:
+                pass
 
             save_config(cfg)
             _clear_status_cache()
@@ -2456,6 +3527,13 @@ class Handler(BaseHTTPRequestHandler):
             if diag_fail > 0:
                 warn_messages.append(f"{diag_fail} critical diagnostic issue(s) still remain.")
 
+            diag_items = diag.get("items", []) if isinstance(diag, dict) else []
+            critical_ids = [
+                str(i.get("id", "") or "")
+                for i in diag_items
+                if isinstance(i, dict) and str(i.get("status", "")) == "fail"
+            ][:10]
+
             self._json({
                 "ok": bool(diag_fail == 0 and setup_ok),
                 "setup_ok": bool(setup_ok),
@@ -2466,7 +3544,11 @@ class Handler(BaseHTTPRequestHandler):
                 "syncthing_running": bool(running),
                 "folder_ensured": bool(ensured),
                 "actions": actions[:40],
+                "auto_accept": aa,
                 "diag_counts": {"fail": diag_fail, "warn": diag_warn, "pass": int(counts.get("pass", 0) or 0)},
+                "diag_summary": str(diag.get("summary", "") or ""),
+                "quick_fixes": (diag.get("quick_fixes", []) if isinstance(diag, dict) else [])[:8],
+                "critical_ids": critical_ids,
                 "warn": " | ".join([w for w in warn_messages if w]) if warn_messages else "",
                 "msg": "Auto-fix completed." if (diag_fail == 0 and setup_ok) else "Auto-fix applied with remaining issues.",
             })
@@ -2476,6 +3558,9 @@ class Handler(BaseHTTPRequestHandler):
             if not shared_txt:
                 self._json({"ok": False, "msg": "Shared folder path is missing.", "syncthing_running": False, "folder_ensured": False, "degraded": True})
                 return
+            if shared_txt != normalize_path_value(cfg.get("shared_dir", "")):
+                cfg["shared_dir"] = shared_txt
+                save_config(cfg)
             shared = Path(shared_txt)
             # make sure physical folders exist (world_latest, backups)
             try:
@@ -2485,6 +3570,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             running = ensure_syncthing_running()
             ensured = st_api.ensure_folder(shared) if running else False
+            aa = auto_accept_syncthing_pending(cfg) if running and ensured else {"ok": False}
             _clear_status_cache()
             if not running:
                 self._json({
@@ -2504,7 +3590,10 @@ class Handler(BaseHTTPRequestHandler):
                     "folder_ensured": False,
                 })
                 return
-            self._json({"ok": True, "syncthing_running": True, "folder_ensured": True, "msg": "Sync setup verified."})
+            msg = "Sync setup verified."
+            if aa.get("ok") and (aa.get("accepted_devices") or aa.get("accepted_folders")):
+                msg += f" {aa.get('msg', '')}"
+            self._json({"ok": True, "syncthing_running": True, "folder_ensured": True, "msg": msg, "auto_accept": aa})
         else:
             self.send_response(404)
             self.end_headers()
@@ -2549,7 +3638,11 @@ class Handler(BaseHTTPRequestHandler):
                 or (get_bin_dir() / ("syncthing.exe" if platform.system() == "Windows" else "syncthing")).exists()
             ),
         )
-        syn_health = _cached_value("syn:health", STATUS_TTL_SYN_HEALTH_S, lambda: st_api.get_health("mc-shared"))
+        syn_health = _as_dict(
+            _cached_value("syn:health", STATUS_TTL_SYN_HEALTH_S, lambda: st_api.get_health("mc-shared"))
+        )
+        java_path = _cached_value("java:path", 20.0, lambda: shutil.which("java") or "")
+        java_ok = bool(java_path)
         syn_status = "missing"
         if syn_ok and not syn_health.get("running"):
             syn_status = "stopped"
@@ -2583,10 +3676,12 @@ class Handler(BaseHTTPRequestHandler):
             STATUS_TTL_SYNC_PENDING_S,
             lambda: st_api.get_pending_count("mc-shared") if syn_ok else 0,
         )
-        props = _cached_value(
-            f"server_props:{server_dir}",
-            3.0,
-            lambda: parse_server_properties(server_dir) if server_dir else {},
+        props = _as_dict(
+            _cached_value(
+                f"server_props:{server_dir}",
+                3.0,
+                lambda: parse_server_properties(server_dir) if server_dir else {},
+            )
         )
         raw_max_players = props.get("max-players")
         if raw_max_players is None or str(raw_max_players).strip() == "":
@@ -2618,10 +3713,12 @@ class Handler(BaseHTTPRequestHandler):
         elif running:
             server_state = "running"
 
-        lock_info = _cached_value(
-            f"lock_info:{shared}",
-            STATUS_TTL_LOCK_INFO_S,
-            lambda: lock_manager.get_lock(shared) if shared else None,
+        lock_info = _as_dict(
+            _cached_value(
+                f"lock_info:{shared}",
+                STATUS_TTL_LOCK_INFO_S,
+                lambda: lock_manager.get_lock(shared) if shared else None,
+            )
         )
         me = load_local_user()
         lock_key = str(lock_info.get("project_key", "")).strip() if lock_info else ""
@@ -2655,7 +3752,7 @@ class Handler(BaseHTTPRequestHandler):
             "running": running,
             "server_state": server_state,
             "server_ready": bool(session_ready or mc_server.is_ready()),
-            "lock": lock_info,
+            "lock": lock_info if lock_info else None,
             "user": me,
             "ram": cfg["ram"],
             "max_players": int(cfg.get("max_players", 20)),
@@ -2688,6 +3785,8 @@ class Handler(BaseHTTPRequestHandler):
             "syncthing_folder_exists": syn_health.get("folder_exists", False),
             "syncthing_folder_paused": syn_health.get("folder_paused"),
             "syncthing_status": syn_status,
+            "java_ok": java_ok,
+            "java_path": java_path,
             "task": task_snapshot,
             "server_pid": mc_server.get_pid(),
             "server_uptime_s": uptime_s,
@@ -2723,10 +3822,21 @@ class Handler(BaseHTTPRequestHandler):
         }
 
     def _list_dirs(self, path_str):
-        p = Path(path_str).expanduser()
+        raw = str(path_str or "").strip().strip('"').strip("'")
+        mismatch_msg = ""
+        is_windows_style = bool(re.match(r"^[A-Za-z]:[\\/]", raw))
+        is_unix_style = raw.startswith("/")
+        if platform.system() == "Windows" and is_unix_style:
+            mismatch_msg = "Linux-style path detected on Windows. Showing Home folder."
+            raw = str(Path.home())
+        elif platform.system() != "Windows" and is_windows_style:
+            mismatch_msg = "Windows-style path detected on Linux/macOS. Showing Home folder."
+            raw = str(Path.home())
+
+        p = Path(raw or str(Path.home())).expanduser()
         if not p.exists() or not p.is_dir():
             p = Path.home()
-        
+
         try:
             items = []
             # Parent dir
@@ -2735,7 +3845,10 @@ class Handler(BaseHTTPRequestHandler):
             for item in sorted(p.iterdir(), key=lambda x: x.name.lower()):
                 if item.is_dir():
                     items.append({"name": item.name, "path": str(item), "is_dir": True})
-            return {"current": str(p), "items": items}
+            out = {"current": str(p), "items": items}
+            if mismatch_msg:
+                out["error"] = mismatch_msg
+            return out
         except Exception as e:
             return {"error": str(e), "current": str(p), "items": []}
 
@@ -2757,73 +3870,116 @@ class Handler(BaseHTTPRequestHandler):
 
     def _start_host_flow(self, cfg):
         def task(progress_cb):
-            shared = Path(cfg["shared_dir"])
-            server = Path(cfg["server_dir"])
-            pkey = ensure_project_key(cfg)
-            lock_acquired = False
-            tunnel_started = False
-            with state_lock:
-                host_session["last_cfg"] = dict(cfg)
-                host_session["ready"] = False
-            
-            try:
-                progress_cb(10, "Configuring Syncthing...")
-                ensure_syncthing_running()
-                st_api.ensure_folder(shared)
-
-                progress_cb(20, "Acquiring host lock...")
-                ok_lock, msg_lock = lock_manager.create_lock(shared, load_local_user(), pkey, no_expire=True)
-                if not ok_lock:
-                    raise RuntimeError(f"Failed to acquire host lock: {msg_lock}")
-                lock_acquired = True
-                with state_lock:
-                    host_session["active"] = True
-                # Ensure peers receive lock before folder is paused.
-                st_api.scan_folder("mc-shared")
-                time.sleep(1.2)
-                st_api.set_paused("mc-shared", True)  # Pause world sync during run
-
-                progress_cb(40, "Syncing world from shared...")
-                backup_manager.copy_world(shared / "world_latest", server, progress_cb=lambda p,m: progress_cb(40+int(p*0.25), m))
-
-                progress_cb(70, "Starting Tunnel & Server...")
-                t_manager.start()
-                tunnel_started = True
-                update_server_properties(
-                    server,
-                    {
-                        "max-players": int(cfg.get("max_players", 20)),
-                        "white-list": bool(cfg.get("whitelist_enabled", False)),
-                    },
-                )
-
-                # Use RAM setting for Java args
-                ram_args = f"-Xmx{cfg['ram']} -Xms2G"
-                ok, msg = mc_server.start(server, cfg["server_jar"], ram_args)
-                if not ok:
-                    raise RuntimeError(f"Server start failed: {msg}")
-
-                global last_sync_time
-                last_sync_time = datetime.now().isoformat()
-                progress_cb(100, "Server process started. Waiting for READY...")
-            except Exception:
-                if tunnel_started:
-                    try:
-                        t_manager.stop()
-                    except Exception:
-                        pass
-                if lock_acquired:
-                    try:
-                        lock_manager.remove_lock(shared)
-                    except Exception:
-                        pass
-                st_api.set_paused("mc-shared", False)
-                with state_lock:
-                    host_session["active"] = False
-                    host_session["ready"] = False
-                raise
+            self._run_local_start_sequence(cfg, progress_cb)
 
         return run_background_task(task, action="starting")
+
+    def _run_local_start_sequence(self, cfg, progress_cb, progress_base: int = 0, progress_span: int = 100):
+        shared = Path(cfg["shared_dir"])
+        server = Path(cfg["server_dir"])
+        pkey = ensure_project_key(cfg)
+        lock_acquired = False
+        tunnel_started = False
+
+        def _p(local_pct: int, msg: str):
+            lp = max(0, min(100, int(local_pct)))
+            global_pct = max(0, min(100, int(progress_base + (lp / 100.0) * progress_span)))
+            progress_cb(global_pct, msg)
+
+        with state_lock:
+            host_session["last_cfg"] = dict(cfg)
+            host_session["ready"] = False
+
+        try:
+            _p(10, "Configuring Syncthing...")
+            ensure_syncthing_running()
+            st_api.ensure_folder(shared)
+
+            _p(20, "Acquiring host lock...")
+            ok_lock, msg_lock = lock_manager.create_lock(
+                shared,
+                load_local_user(),
+                pkey,
+                no_expire=True,
+                owner_node_id=get_local_node_id(),
+            )
+            if not ok_lock:
+                raise RuntimeError(f"Failed to acquire host lock: {msg_lock}")
+            lock_acquired = True
+            with state_lock:
+                host_session["active"] = True
+            st_api.scan_folder("mc-shared")
+            time.sleep(1.2)
+            st_api.set_paused("mc-shared", True)
+
+            _p(40, "Syncing world from shared...")
+            backup_manager.copy_world(
+                shared / "world_latest",
+                server,
+                progress_cb=lambda p, m: _p(40 + int(p * 0.25), m),
+            )
+
+            _p(70, "Starting Tunnel & Server...")
+            t_manager.start()
+            tunnel_started = True
+            update_server_properties(
+                server,
+                {
+                    "max-players": int(cfg.get("max_players", 20)),
+                    "white-list": bool(cfg.get("whitelist_enabled", False)),
+                },
+            )
+            ram_args = f"-Xmx{cfg['ram']} -Xms2G"
+            ok, msg = mc_server.start(server, cfg["server_jar"], ram_args)
+            if not ok:
+                raise RuntimeError(f"Server start failed: {msg}")
+
+            global last_sync_time
+            last_sync_time = datetime.now().isoformat()
+            _p(100, "Server process started. Waiting for READY...")
+        except Exception:
+            if tunnel_started:
+                try:
+                    t_manager.stop()
+                except Exception:
+                    pass
+            if lock_acquired:
+                try:
+                    lock_manager.remove_lock(shared)
+                except Exception:
+                    pass
+            st_api.set_paused("mc-shared", False)
+            with state_lock:
+                host_session["active"] = False
+                host_session["ready"] = False
+            raise
+
+    def _migrate_host_here_flow(self, cfg, target_node_id: str):
+        def task(progress_cb):
+            node = str(target_node_id or "").strip()
+            if not node:
+                raise RuntimeError("Target node id is missing for migration.")
+            _log_automation_event(f"Host migration requested from node {node}.")
+            progress_cb(5, "Sending stop request to current host...")
+            ok_send, msg_send, req_id = dispatch_remote_host_action(cfg, node, "stop")
+            if not ok_send:
+                raise RuntimeError(msg_send or "Failed to dispatch remote stop request.")
+
+            progress_cb(20, "Waiting for remote acknowledgement...")
+            ok_ack, msg_ack = wait_for_remote_ack(cfg, req_id, timeout_s=min(40.0, AUTO_SWITCH_WAIT_S * 0.45))
+            if not ok_ack:
+                raise RuntimeError(msg_ack or "Remote host did not acknowledge stop request.")
+
+            progress_cb(40, "Waiting for host lock release...")
+            ok_rel, msg_rel = wait_for_lock_release(cfg, timeout_s=AUTO_SWITCH_WAIT_S)
+            if not ok_rel:
+                raise RuntimeError(msg_rel or "Host lock was not released in time.")
+
+            progress_cb(55, "Starting on this PC...")
+            self._run_local_start_sequence(cfg, progress_cb, progress_base=55, progress_span=45)
+            _log_automation_event("Host migrated successfully to this PC.")
+
+        return run_background_task(task, action="migrating")
 
     def _stop_host_flow(self, cfg):
         def task(progress_cb):
@@ -2849,7 +4005,13 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 ensure_syncthing_running()
                 st_api.ensure_folder(shared)
-                ok_lock, msg_lock = lock_manager.create_lock(shared, load_local_user(), pkey, no_expire=True)
+                ok_lock, msg_lock = lock_manager.create_lock(
+                    shared,
+                    load_local_user(),
+                    pkey,
+                    no_expire=True,
+                    owner_node_id=get_local_node_id(),
+                )
                 if not ok_lock:
                     raise RuntimeError(f"Failed to acquire host lock for restart: {msg_lock}")
                 lock_acquired = True
@@ -3056,8 +4218,15 @@ if __name__ == "__main__":
     bootstrap_bundled_bin_assets()
     # make sure syncthing binary is available (download if missing)
     ensure_syncthing_binary()
-    # best-effort auto start when app starts
-    ensure_syncthing_running()
+    # first-run local auto-detect (shared/server paths, jar, key markers)
+    try:
+        boot = bootstrap_first_run_auto_setup()
+        if boot.get("changed"):
+            _log_automation_event("First-run auto setup applied.")
+    except Exception:
+        pass
+    # best-effort syncthing start without blocking dashboard startup path
+    threading.Thread(target=ensure_syncthing_running, kwargs={"timeout_s": 2.8}, daemon=True).start()
     try:
         cleanup_runtime_artifacts(load_config(force=True))
     except Exception:
@@ -3067,6 +4236,8 @@ if __name__ == "__main__":
     threading.Thread(target=monitor_node_presence, daemon=True).start()
     threading.Thread(target=monitor_remote_host_dispatch, daemon=True).start()
     threading.Thread(target=monitor_housekeeping, daemon=True).start()
+    threading.Thread(target=monitor_syncthing_auto_accept, daemon=True).start()
+    threading.Thread(target=monitor_syncthing_self_heal, daemon=True).start()
 
     PORT = 7842
     print(f"[INFO] MC Host Manager (Phase 2) running on http://localhost:{PORT}")

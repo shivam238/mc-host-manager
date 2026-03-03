@@ -349,14 +349,6 @@
       padding: 32px 20px;
     }
 
-    .host-action-row {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 12px;
-      flex-wrap: wrap;
-    }
-
     .btn-host {
       width: 180px;
       height: 180px;
@@ -380,42 +372,6 @@
 
     .btn-host .icon {
       font-size: 40px;
-    }
-
-    .btn-host-secondary {
-      min-width: 148px;
-      height: 62px;
-      border-radius: 10px;
-      border: 1px solid var(--border);
-      background: linear-gradient(180deg, #112947 0%, #0d2139 100%);
-      color: var(--muted);
-      font-family: 'Inter', sans-serif;
-      font-size: 16px;
-      font-weight: 700;
-      letter-spacing: .4px;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      cursor: pointer;
-      transition: all .2s ease;
-      box-shadow: 0 2px 8px rgba(8, 20, 36, 0.25);
-    }
-
-    .btn-host-secondary:hover {
-      transform: translateY(-1px);
-      color: #d8f2ff;
-      border-color: #2f5d88;
-      background: linear-gradient(180deg, #17355a 0%, #12304f 100%);
-    }
-
-    .btn-host-secondary:disabled {
-      cursor: not-allowed;
-      color: #7f90a9;
-      border-color: #2a3b56;
-      background: #18263b;
-      box-shadow: none;
-      transform: none;
     }
 
     .btn-host:hover {
@@ -1058,14 +1014,6 @@
       }
       .quick-action-grid {
         grid-template-columns: 1fr 1fr;
-      }
-      .host-action-row {
-        width: 100%;
-      }
-      .btn-host,
-      .btn-host-secondary {
-        width: 100%;
-        max-width: 320px;
       }
     }
 
@@ -1736,26 +1684,6 @@
       font-size: 22px;
     }
 
-    .btn-host-secondary {
-      border-color: #cbd5e1;
-      background: linear-gradient(180deg, #f8fafc, #edf2f7);
-      color: #334155;
-      box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
-    }
-
-    .btn-host-secondary:hover {
-      background: linear-gradient(180deg, #ffffff, #eef4fb);
-      border-color: #b5c4d8;
-      color: #0f172a;
-    }
-
-    .btn-host-secondary:disabled {
-      background: #e2e8f0;
-      border-color: #cbd5e1;
-      color: #94a3b8;
-      box-shadow: none;
-    }
-
     .btn-host:hover {
       transform: translateY(-1px);
       background: linear-gradient(180deg, #40bf5a, #31ab48);
@@ -2138,26 +2066,6 @@
       box-shadow: none;
     }
 
-    [data-theme="dark"] .btn-host-secondary {
-      border-color: #2e5078;
-      background: linear-gradient(180deg, #102846, #0c203a);
-      color: #96caef;
-      box-shadow: 0 4px 14px rgba(9, 26, 46, 0.3);
-    }
-
-    [data-theme="dark"] .btn-host-secondary:hover {
-      background: linear-gradient(180deg, #163760, #123052);
-      border-color: #3a6c9f;
-      color: #dff4ff;
-    }
-
-    [data-theme="dark"] .btn-host-secondary:disabled {
-      border-color: #334865;
-      background: #17263d;
-      color: #748ba8;
-      box-shadow: none;
-    }
-
     [data-theme="dark"] .host-status-text,
     [data-theme="dark"] .status-item-label,
     [data-theme="dark"] .form-row label,
@@ -2375,16 +2283,11 @@
             </div>
 
             <div class="host-section" style="padding: 10px 0 30px;">
-              <div class="host-action-row">
-                <button class="btn-host disabled" id="btn-host" onclick="toggleHost()">
-                  <div class="pulse-ring"></div>
-                  <div class="icon" id="btn-icon">&#9889;</div>
-                  <div id="btn-label">LOADING</div>
-                </button>
-                <button class="btn-host-secondary" id="btn-restart-main" onclick="restartHost()" disabled title="Restart is available only when server is fully running.">
-                  &#x1F501; RESTART
-                </button>
-              </div>
+              <button class="btn-host disabled" id="btn-host" onclick="toggleHost()">
+                <div class="pulse-ring"></div>
+                <div class="icon" id="btn-icon">&#9889;</div>
+                <div id="btn-label">LOADING</div>
+              </button>
               <div class="host-status-text" id="host-status-text">
                 Loading...
               </div>
@@ -2659,7 +2562,7 @@
                   &#x1F4C1; Open Server Files
                 </button>
                 <button class="btn-backup" onclick="openFolder('shared-world')" style="margin-bottom:12px">
-                  &#x1F30D; Open Shared World Folder
+                  &#x1F30D; Open Synced World Save (world_latest)
                 </button>
                 <button class="btn-backup" onclick="openFolder('backups')" style="margin-bottom:12px">
                   &#x1F5C2; Open Backups Folder
@@ -2675,10 +2578,10 @@
                   &#x1F504; Sync World Now
                 </button>
                 <button class="btn-backup" onclick="doBackup()" style="margin-bottom:12px">
-                  &#x1F4BE; Backup Current World
+                  &#x1F4BE; Backup World Data
                 </button>
                 <button class="btn-backup" onclick="openFolder('world_latest')" style="margin-bottom:12px">
-                  &#x1F30D; Open world_latest
+                  &#x1F30D; Open Synced world_latest
                 </button>
                 <div class="host-info" style="margin-top:12px;">
                   <div class="host-row"><span class="k">Server State</span><span class="v" id="wd-state">&mdash;</span></div>
@@ -3181,8 +3084,6 @@
       let latestStatusSnapshot = {};
       let latestRemoteNodes = [];
       let localNodeId = '';
-      let currentNavKey = 'server';
-      let remotePrevNavKey = 'server';
       let metricHist = { cpu: [], mem: [], disk: [] };
       let themePref = 'dark';
       let autoRedirectDone = false;
@@ -3197,37 +3098,6 @@
       let taskReqInFlight = false;
       let diagReqInFlight = false;
 
-      async function apiFetchJson(url, opts = {}, timeoutMs = 4500) {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), timeoutMs);
-        try {
-          const req = Object.assign({ cache: 'no-store' }, opts || {});
-          req.signal = controller.signal;
-          req.headers = Object.assign({}, (opts && opts.headers) ? opts.headers : {});
-          const r = await fetch(url, req);
-          if (!r.ok) throw new Error(`HTTP ${r.status}`);
-          return await r.json();
-        } finally {
-          clearTimeout(timer);
-        }
-      }
-
-      function isLogPanelOpen() {
-        const side = document.getElementById('section-sidepanel');
-        if (!side || !side.classList.contains('modal-open')) return false;
-        return currentNavKey === 'log';
-      }
-
-      function shouldPollLogs() {
-        if (document.hidden && !taskPending) return false;
-        return isLogPanelOpen() || serverRunning || taskPending;
-      }
-
-      function shouldPollLogDetails() {
-        if (document.hidden) return false;
-        return isLogPanelOpen() || (serverRunning && currentNavKey === 'log');
-      }
-
       window.onload = () => {
         initTheme();
         setRamControls('s', '4G');
@@ -3237,19 +3107,19 @@
         pollStatus();
         pollLogDetails();
         pollInterval = setInterval(pollStatus, 1600);
-        logInterval = setInterval(pollLogs, 2600);
-        logDetailsInterval = setInterval(pollLogDetails, 12000);
+        logInterval = setInterval(pollLogs, 2500);
+        logDetailsInterval = setInterval(pollLogDetails, 7000);
         window.addEventListener('keydown', (e) => {
           if (e.key === 'Escape') closeControlPanel();
         });
       };
 
       async function pollStatus() {
-        if (document.hidden && !taskPending) return;
         if (statusReqInFlight) return;
         statusReqInFlight = true;
         try {
-          const d = await apiFetchJson('/status', {}, 4200);
+          const r = await fetch('/status');
+          const d = await r.json();
           applyStatus(d);
         } catch (e) {
           setBtn('disabled', '\u26A0\uFE0F', 'NO CONNECTION', 'Backend offline.');
@@ -3259,22 +3129,22 @@
       }
 
       async function pollLogs() {
-        if (!shouldPollLogs()) return;
         if (logsReqInFlight) return;
         logsReqInFlight = true;
         try {
-          const d = await apiFetchJson('/logs', {}, 3800);
+          const r = await fetch('/logs');
+          const d = await r.json();
           renderLogs(d.logs);
         } catch (e) { }
         finally { logsReqInFlight = false; }
       }
 
       async function pollLogDetails() {
-        if (!shouldPollLogDetails()) return;
         if (logDetailsReqInFlight) return;
         logDetailsReqInFlight = true;
         try {
-          const d = await apiFetchJson('/logs/details', {}, 5000);
+          const r = await fetch('/logs/details');
+          const d = await r.json();
           renderLogDetails(d);
         } catch (e) { }
         finally { logDetailsReqInFlight = false; }
@@ -3284,7 +3154,8 @@
         if (taskReqInFlight) return;
         taskReqInFlight = true;
         try {
-          const d = await apiFetchJson('/task', {}, 3000);
+          const r = await fetch('/task');
+          const d = await r.json();
           if (d.running) {
               showProgress(d.pct, d.msg);
           } else {
@@ -3302,7 +3173,8 @@
         if (diagReqInFlight) return;
         diagReqInFlight = true;
         try {
-          const d = await apiFetchJson('/diagnostics', {}, 5500);
+          const r = await fetch('/diagnostics');
+          const d = await r.json();
           const wrap = document.getElementById('diag-list');
           if (!wrap) return;
           const items = Array.isArray(d.items) ? d.items : [];
@@ -3436,11 +3308,9 @@
         if (dlBtn) dlBtn.disabled = !d.can_open_server_files;
         const dlBtn2 = document.getElementById('btn-download-server-2');
         if (dlBtn2) dlBtn2.disabled = !d.can_open_server_files;
-        setRestartBtn(false, 'Restart is available only when server is fully running.');
 
         if (d.task && d.task.running) {
           showProgress(d.task.pct || 0, d.task.msg || 'Working...');
-          setRestartBtn(false, 'Wait for current task to complete.');
           const taskAction = String(d.task.action || '').toLowerCase();
           if (taskAction === 'starting') {
             setBtn('disabled', '\u23F3', 'STARTING', d.task.msg || 'Server booting...');
@@ -3458,42 +3328,35 @@
 
         if (!setupOk) {
           setBtn('disabled', '\u2699\uFE0F', 'SETUP', 'Finish wizard to start.', false);
-          setRestartBtn(false, 'Complete setup first.');
           return;
         }
 
         if (d.server_state === 'starting') {
           setBtn('disabled', '\u23F3', 'STARTING', 'Server booting. Stop is disabled until fully ready.');
-          setRestartBtn(false, 'Wait until server is fully ready.');
           document.getElementById('server-dot').style.background = 'var(--yellow)';
           document.getElementById('server-status-label').textContent = 'SERVER STARTING';
         } else if (d.server_state === 'stopping' || d.server_state === 'recovering') {
           setBtn('disabled', '\uD83D\uDD04', 'FINALIZING', 'Saving, backup, sync in progress...');
-          setRestartBtn(false, 'Finalize in progress.');
           document.getElementById('server-dot').style.background = 'var(--accent)';
           document.getElementById('server-status-label').textContent = 'FINALIZING';
         } else if (d.running) {
           let addr = d.tunnel_addr !== "Not Active" ? d.tunnel_addr : d.local_ip + ":25565";
           setBtn('running', '\u23F9', 'STOP', `Hosting! IP: ${addr}`);
-          setRestartBtn(!!d.server_ready, d.server_ready ? 'Safe restart: stop -> backup/sync -> start.' : 'Wait until server is fully ready.');
           document.getElementById('server-dot').style.background = 'var(--green)';
           document.getElementById('server-status-label').textContent = 'SERVER ONLINE';
         } else if (lockData && lockData.host !== myName) {
           // Someone else is hosting
           if (lockData.expired) {
             setBtn('disabled', '\u26A0\uFE0F', 'EXPIRED', `${lockData.host} pulse missing.\nHost may be offline.\nUse Settings > Force Clear if sure.`);
-            setRestartBtn(false, 'Locked by another host.');
             document.getElementById('server-dot').style.background = 'var(--accent2)';
             document.getElementById('server-status-label').textContent = 'MAY BE STUCK: ' + lockData.host.toUpperCase();
           } else {
             setBtn('disabled', '\uD83D\uDD12', 'LOCKED', `${lockData.host} is hosting...\nWait for them to stop.`);
-            setRestartBtn(false, 'Locked by another host.');
             document.getElementById('server-dot').style.background = 'var(--yellow)';
             document.getElementById('server-status-label').textContent = 'LOCKED BY ' + lockData.host.toUpperCase();
           }
         } else {
           setBtn('', '\u26A1', 'START', `Ready to host.`);
-          setRestartBtn(false, 'Start server first.');
           document.getElementById('server-dot').style.background = 'var(--muted)';
           document.getElementById('server-status-label').textContent = 'Server Status';
         }
@@ -3595,13 +3458,6 @@
         document.getElementById('host-status-text').textContent = statusText;
       }
 
-      function setRestartBtn(enabled, hint = '') {
-        const btn = document.getElementById('btn-restart-main');
-        if (!btn) return;
-        btn.disabled = !enabled || taskPending;
-        btn.title = hint || (enabled ? 'Safe restart: stop -> backup/sync -> start.' : 'Restart is available only when server is fully running.');
-      }
-
       async function toggleHost() {
         if (taskPending) return;
         if (serverState === 'starting') {
@@ -3628,28 +3484,19 @@
 
       async function restartHost() {
         if (taskPending) return;
-        if (!serverRunning || serverState !== 'running') {
-          toast('Restart is available only when server is fully running.', true);
-          return;
-        }
         const ok = confirm('Restart server now? This will stop, backup/sync, then start again.');
         if (!ok) return;
         taskPending = true;
         showProgress(0, 'Restarting...');
-        try {
-          const d = await apiFetchJson('/host/restart', { method: 'POST', body: '{}', headers: { 'Content-Type': 'application/json' } }, 10000);
-          if (!d.ok) {
-            taskPending = false;
-            hideProgress();
-            toast(d.msg || 'Restart failed', true);
-            return;
-          }
-          taskInterval = setInterval(pollTask, 800);
-        } catch (e) {
+        const r = await fetch('/host/restart', { method: 'POST', body: '{}', headers: { 'Content-Type': 'application/json' } });
+        const d = await r.json();
+        if (!d.ok) {
           taskPending = false;
           hideProgress();
-          toast('Restart request failed', true);
+          toast(d.msg || 'Restart failed', true);
+          return;
         }
+        taskInterval = setInterval(pollTask, 800);
       }
 
       async function killHost() {
@@ -3832,7 +3679,6 @@
         document.querySelectorAll('.sb-btn').forEach(b => b.classList.remove('active'));
         const el = document.getElementById(`nav-${key}`);
         if (el) el.classList.add('active');
-        if (key) currentNavKey = key;
       }
 
       function scrollToSection(id) {
@@ -3868,8 +3714,6 @@
         }
         if (section === 'log') {
           openControlPanel('t-log', 'Log', section);
-          pollLogs();
-          pollLogDetails();
           const lw = document.getElementById('log-wrap-history');
           if (lw) {
             lw.classList.add('focus');
@@ -3951,8 +3795,11 @@
       }
 
       function hideProgress() {
-        document.getElementById('progress-wrap').classList.remove('visible');
+        const wrap = document.getElementById('progress-wrap');
+        if (!wrap) return;
+        wrap.classList.remove('visible');
       }
+
 
       function toast(msg, isErr = false) {
         const t = document.getElementById('toast');
@@ -4020,8 +3867,7 @@
       }
 
       function escHtml(s) {
-        const v = String(s ?? '');
-        return v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
       }
 
       function fmtTime(iso) {
@@ -4174,14 +4020,9 @@
 
       function closeRemoteHostModal() {
         document.getElementById('remote-modal').classList.remove('open');
-        if (currentNavKey === 'remote-host') {
-          setNavActive(remotePrevNavKey || 'server');
-        }
       }
 
       function openRemoteHostModal() {
-        remotePrevNavKey = currentNavKey || 'server';
-        setNavActive('remote-host');
         renderRemoteHostModal();
         document.getElementById('remote-modal').classList.add('open');
       }

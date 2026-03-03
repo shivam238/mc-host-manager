@@ -1,7 +1,5 @@
 # Setup Guide (User Friendly)
 
-Project Owner: **Shivam Kumar Mahto**
-
 ## Step 1: Install Dependencies
 
 ### Required
@@ -128,20 +126,3 @@ It also generates a single-file installer:
 - App now auto-cleans stale temp/control files in background.
 - It does **not** delete active server data/world files.
 
-## Publish to GitHub
-If you want this project on GitHub as a standalone repo:
-
-1. Create a new empty repository on GitHub (no README/license in that repo).
-2. Run these commands inside this project folder:
-
-```bash
-cd /home/shivam/programming/Projects/mc-launcher
-git init
-git add .
-git commit -m "Initial stable release"
-git branch -M main
-git remote add origin <YOUR_GITHUB_REPO_URL>
-git push -u origin main
-```
-
-If your GitHub account uses 2FA, use a Personal Access Token when git asks for password.

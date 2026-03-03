@@ -31,18 +31,17 @@ if ! "$PYTHON" -c "import requests" >/dev/null 2>&1; then
 fi
 
 PORT=7842
-echo "  [OK] Starting on http://localhost:${PORT}"
-echo
-
-# Open browser in background (best effort).
-(
-  sleep 1.8
+if command -v curl >/dev/null 2>&1 && curl -fsS "http://127.0.0.1:${PORT}/status" >/dev/null 2>&1; then
+  echo "  [INFO] App already running on http://localhost:${PORT}"
   if command -v xdg-open >/dev/null 2>&1; then
     xdg-open "http://localhost:${PORT}" >/dev/null 2>&1 || true
   elif command -v open >/dev/null 2>&1; then
     open "http://localhost:${PORT}" >/dev/null 2>&1 || true
   fi
-) &
+  exit 0
+fi
+
+echo "  [OK] Starting on http://localhost:${PORT}"
+echo
 
 exec "$PYTHON" "$SCRIPT_DIR/host_manager.py"
-

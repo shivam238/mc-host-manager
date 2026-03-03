@@ -1,7 +1,0 @@
-{
-  "your_name": "Shivam",
-  "server_folder": "/home/shivam/.local/share/PrismLauncher/instances/Cave Horror Project 1/Cave Horror Project 1 v3.1.4 Server Pack/",
-  "server_jar": "server.jar",
-  "shared_dir": "/home/shivam/.local/share/PrismLauncher/instances/Cave Horror Project 1/Cave Horror Project 1 v3.1.4 Server Pack/",
-  "java_args": "-Xmx4G -Xms2G"
-}

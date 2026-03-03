@@ -53,12 +53,13 @@ def _best_local_ip():
         pass
     return "127.0.0.1"
 
-def _lock_payload(user_name, project_key="", no_expire=True):
+def _lock_payload(user_name, project_key="", no_expire=True, owner_node_id=""):
     ip = _best_local_ip()
     ui_url = f"http://{ip}:7842"
     return {
         "host": user_name,
         "hostname": socket.gethostname(),
+        "owner_node_id": str(owner_node_id or ""),
         "ip": ip,
         "ui_url": ui_url,
         "project_key": str(project_key or ""),
@@ -74,20 +75,24 @@ def _write_status(shared_dir, user_name, ui_url):
         f.write(f"{user_name} is hosting @ {ui_url}")
 
 
-def create_lock(shared_dir, user_name, project_key="", no_expire=True):
+def create_lock(shared_dir, user_name, project_key="", no_expire=True, owner_node_id=""):
     p = get_lock_path(shared_dir)
     p.parent.mkdir(parents=True, exist_ok=True)
-    data = _lock_payload(user_name, project_key, no_expire=no_expire)
+    data = _lock_payload(user_name, project_key, no_expire=no_expire, owner_node_id=owner_node_id)
 
-    # Refuse overwrite of non-expired lock owned by someone else/project.
+    # Refuse overwrite of any active lock (prevents dual-host race in multi-PC setups).
     existing = get_lock(shared_dir)
     if existing and not existing.get("expired", False):
-        ex_host = str(existing.get("host", ""))
+        ex_host = str(existing.get("host", "") or "")
         ex_key = str(existing.get("project_key", "") or "")
-        if ex_host != user_name:
-            return False, f"Locked by {ex_host}"
+        ex_owner = str(existing.get("owner_node_id", "") or "")
+        # Strict project barrier.
         if ex_key and ex_key != str(project_key or ""):
             return False, "Lock belongs to another project key"
+        # When lock owner metadata exists and differs, reject.
+        if ex_owner and owner_node_id and ex_owner != str(owner_node_id):
+            return False, f"Locked by {ex_host or 'another host'}"
+        return False, f"Locked by {ex_host or 'another host'}"
 
     # If stale lock exists, remove first, then atomically create.
     if p.exists():
@@ -107,21 +112,25 @@ def create_lock(shared_dir, user_name, project_key="", no_expire=True):
         return False, str(e)
 
 
-def refresh_lock(shared_dir, user_name, project_key=""):
+def refresh_lock(shared_dir, user_name, project_key="", owner_node_id=""):
     p = get_lock_path(shared_dir)
     existing = get_lock(shared_dir)
     if not existing:
         return False, "Lock missing"
     ex_host = str(existing.get("host", ""))
     ex_key = str(existing.get("project_key", "") or "")
+    ex_owner = str(existing.get("owner_node_id", "") or "")
     if ex_host != str(user_name):
         return False, "Lock owned by another host"
+    if ex_owner and owner_node_id and ex_owner != str(owner_node_id):
+        return False, "Lock owned by another node"
     if ex_key and ex_key != str(project_key or ""):
         return False, "Project key mismatch"
     data = _lock_payload(
         user_name,
         project_key or ex_key,
         no_expire=bool(existing.get("no_expire", False)),
+        owner_node_id=owner_node_id or ex_owner,
     )
     try:
         with open(p, "w") as f:

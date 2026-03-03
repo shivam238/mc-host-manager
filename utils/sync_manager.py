@@ -11,6 +11,9 @@ import os
 import platform
 import time
 import threading
+from typing import Any, Callable, TypeVar, cast
+
+T = TypeVar("T")
 
 class SyncManager:
     def __init__(self, url="http://localhost:8384"):
@@ -19,7 +22,7 @@ class SyncManager:
         self.headers = {"X-API-Key": self.api_key} if self.api_key else {}
         self._session = requests.Session()
         self._cache_lock = threading.Lock()
-        self._cache: dict[str, tuple[float, object]] = {}
+        self._cache: dict[str, tuple[float, Any]] = {}
         self._folder_alias: dict[str, str] = {}
 
     def refresh_api_key(self):
@@ -37,12 +40,12 @@ class SyncManager:
                 if key.startswith(prefix):
                     self._cache.pop(key, None)
 
-    def _cached(self, cache_key: str, ttl_s: float, loader):
+    def _cached(self, cache_key: str, ttl_s: float, loader: Callable[[], T]) -> T:
         now = time.time()
         with self._cache_lock:
             entry = self._cache.get(cache_key)
             if entry and (now - entry[0]) < ttl_s:
-                return entry[1]
+                return cast(T, entry[1])
         value = loader()
         with self._cache_lock:
             self._cache[cache_key] = (now, value)
@@ -193,7 +196,7 @@ class SyncManager:
             return True
         except: return False
 
-    def get_health(self, folder_id="mc-shared"):
+    def get_health(self, folder_id="mc-shared") -> dict[str, Any]:
         def _load_health():
             health = {
                 "api_key_ok": bool(self.api_key),
@@ -257,7 +260,7 @@ class SyncManager:
         except Exception:
             return False
 
-    def get_pending_count(self, folder_id="mc-shared"):
+    def get_pending_count(self, folder_id="mc-shared") -> int:
         def _load_pending():
             try:
                 if not self.api_key:
@@ -292,4 +295,345 @@ class SyncManager:
             except Exception:
                 return 0
 
-        return int(self._cached(f"pending:{folder_id}", 8.0, _load_pending))
+        return self._cached(f"pending:{folder_id}", 8.0, _load_pending)
+
+    def ensure_device_for_folder(self, device_id, folder_id="mc-shared", label="MC Host Peer"):
+        """Best-effort: add remote device and share folder with it."""
+        dev_id = str(device_id or "").strip()
+        if not dev_id:
+            return False
+        try:
+            if not self.api_key:
+                self.refresh_api_key()
+            if not self.api_key:
+                return False
+            cfg_r = self._request("GET", "/rest/config", timeout=2.2)
+            if cfg_r.status_code != 200:
+                return False
+            cfg = cfg_r.json()
+            changed = False
+
+            devices = cfg.get("devices", [])
+            found_device = None
+            for d in devices:
+                if str(d.get("deviceID", "") or "").strip() == dev_id:
+                    found_device = d
+                    break
+            if not found_device:
+                devices.append(
+                    {
+                        "deviceID": dev_id,
+                        "name": str(label or "MC Host Peer"),
+                        "addresses": ["dynamic"],
+                        "compression": "metadata",
+                        "introducer": False,
+                        "skipIntroductionRemovals": False,
+                        "paused": False,
+                        "autoAcceptFolders": True,
+                    }
+                )
+                cfg["devices"] = devices
+                changed = True
+
+            eff = self._effective_folder_id(folder_id)
+            folders = cfg.get("folders", [])
+            target_folder = None
+            for f in folders:
+                if str(f.get("id", "") or "") == eff:
+                    target_folder = f
+                    break
+            if target_folder is None and eff != folder_id:
+                for f in folders:
+                    if str(f.get("id", "") or "") == folder_id:
+                        target_folder = f
+                        break
+            if target_folder is None:
+                return False
+
+            folder_devices = target_folder.get("devices")
+            if not isinstance(folder_devices, list):
+                folder_devices = []
+            has_dev = any(str(it.get("deviceID", "") or "").strip() == dev_id for it in folder_devices if isinstance(it, dict))
+            if not has_dev:
+                folder_devices.append({"deviceID": dev_id, "introducedBy": ""})
+                target_folder["devices"] = folder_devices
+                changed = True
+
+            if not changed:
+                return True
+
+            put_r = self._request("PUT", "/rest/config", timeout=2.4, json=cfg)
+            if put_r.status_code not in (200, 204):
+                return False
+            # Apply config quickly.
+            try:
+                self._request("POST", "/rest/system/restart", timeout=1.5)
+            except Exception:
+                pass
+            self._clear_cache()
+            return True
+        except Exception:
+            return False
+
+    def _pending_devices(self):
+        """Return pending device IDs offered to this node."""
+        paths = [
+            "/rest/cluster/pending/devices",
+            "/rest/cluster/pendingdevices",
+        ]
+        for path in paths:
+            try:
+                r = self._request("GET", path, timeout=1.8)
+                if r.status_code != 200:
+                    continue
+                data = r.json()
+                out = []
+                if isinstance(data, dict):
+                    # Common shape: { "<deviceID>": {...}, ... }
+                    for k, v in data.items():
+                        did = str(k or "").strip()
+                        if did:
+                            out.append({"deviceID": did, "meta": v if isinstance(v, dict) else {}})
+                    # Alternate shape: {"pendingDevices":[...]}
+                    arr = data.get("pendingDevices")
+                    if isinstance(arr, list):
+                        for row in arr:
+                            if not isinstance(row, dict):
+                                continue
+                            did = str(row.get("deviceID", "") or "").strip()
+                            if did:
+                                out.append({"deviceID": did, "meta": row})
+                elif isinstance(data, list):
+                    for row in data:
+                        if not isinstance(row, dict):
+                            continue
+                        did = str(row.get("deviceID", "") or "").strip()
+                        if did:
+                            out.append({"deviceID": did, "meta": row})
+                # de-dup
+                seen = set()
+                uniq = []
+                for row in out:
+                    did = str(row.get("deviceID", "") or "")
+                    if not did or did in seen:
+                        continue
+                    seen.add(did)
+                    uniq.append(row)
+                return uniq
+            except Exception:
+                continue
+        return []
+
+    def _pending_folders(self):
+        """Return pending folders offered by remote devices."""
+        paths = [
+            "/rest/cluster/pending/folders",
+            "/rest/cluster/pendingfolders",
+        ]
+        for path in paths:
+            try:
+                r = self._request("GET", path, timeout=1.8)
+                if r.status_code != 200:
+                    continue
+                data = r.json()
+                out = []
+                if isinstance(data, dict):
+                    # Common shape: { "<folderID>": { "<deviceID>": {...} } }
+                    for fid, offers in data.items():
+                        folder_id = str(fid or "").strip()
+                        if not folder_id:
+                            continue
+                        if isinstance(offers, dict):
+                            for did, meta in offers.items():
+                                dev_id = str(did or "").strip()
+                                if dev_id:
+                                    out.append({"folderID": folder_id, "deviceID": dev_id, "meta": meta if isinstance(meta, dict) else {}})
+                        elif isinstance(offers, list):
+                            for row in offers:
+                                if not isinstance(row, dict):
+                                    continue
+                                dev_id = str(row.get("deviceID", "") or "").strip()
+                                if dev_id:
+                                    out.append({"folderID": folder_id, "deviceID": dev_id, "meta": row})
+                    # Alternate shape: {"pendingFolders":[...]}
+                    arr = data.get("pendingFolders")
+                    if isinstance(arr, list):
+                        for row in arr:
+                            if not isinstance(row, dict):
+                                continue
+                            folder_id = str(row.get("folderID", "") or "").strip()
+                            dev_id = str(row.get("deviceID", "") or "").strip()
+                            if folder_id and dev_id:
+                                out.append({"folderID": folder_id, "deviceID": dev_id, "meta": row})
+                elif isinstance(data, list):
+                    for row in data:
+                        if not isinstance(row, dict):
+                            continue
+                        folder_id = str(row.get("folderID", "") or "").strip()
+                        dev_id = str(row.get("deviceID", "") or "").strip()
+                        if folder_id and dev_id:
+                            out.append({"folderID": folder_id, "deviceID": dev_id, "meta": row})
+                # de-dup
+                seen = set()
+                uniq = []
+                for row in out:
+                    key = (str(row.get("folderID", "")), str(row.get("deviceID", "")))
+                    if not key[0] or not key[1] or key in seen:
+                        continue
+                    seen.add(key)
+                    uniq.append(row)
+                return uniq
+            except Exception:
+                continue
+        return []
+
+    def auto_accept_pending(self, folder_path, folder_id="mc-shared", allowed_device_ids=None):
+        """
+        Best-effort auto accept pending Syncthing devices/folders.
+        Safety:
+        - If `allowed_device_ids` is provided, only those IDs are accepted.
+        """
+        allow = set()
+        if allowed_device_ids:
+            for d in allowed_device_ids:
+                did = str(d or "").strip()
+                if did:
+                    allow.add(did)
+
+        result = {
+            "ok": False,
+            "accepted_devices": 0,
+            "accepted_folders": 0,
+            "pending_devices": 0,
+            "pending_folders": 0,
+            "skipped_devices": 0,
+            "skipped_folders": 0,
+            "changed": False,
+        }
+        try:
+            if not self.api_key:
+                self.refresh_api_key()
+            if not self.api_key:
+                return result
+            cfg_r = self._request("GET", "/rest/config", timeout=2.2)
+            if cfg_r.status_code != 200:
+                return result
+            cfg = cfg_r.json()
+            changed = False
+
+            pending_devices = self._pending_devices()
+            pending_folders = self._pending_folders()
+            result["pending_devices"] = len(pending_devices)
+            result["pending_folders"] = len(pending_folders)
+
+            # Existing devices in config are tracked to avoid duplicate inserts.
+            known = set()
+            for d in cfg.get("devices", []) if isinstance(cfg.get("devices"), list) else []:
+                if not isinstance(d, dict):
+                    continue
+                did = str(d.get("deviceID", "") or "").strip()
+                if did:
+                    known.add(did)
+
+            def _is_allowed(did: str) -> bool:
+                if not did:
+                    return False
+                return did in allow
+
+            devices_cfg = cfg.get("devices")
+            if not isinstance(devices_cfg, list):
+                devices_cfg = []
+                cfg["devices"] = devices_cfg
+
+            for row in pending_devices:
+                did = str(row.get("deviceID", "") or "").strip()
+                if not _is_allowed(did):
+                    result["skipped_devices"] += 1
+                    continue
+                if did not in known:
+                    devices_cfg.append(
+                        {
+                            "deviceID": did,
+                            "name": "MC Host Peer",
+                            "addresses": ["dynamic"],
+                            "compression": "metadata",
+                            "introducer": False,
+                            "skipIntroductionRemovals": False,
+                            "paused": False,
+                            "autoAcceptFolders": True,
+                        }
+                    )
+                    known.add(did)
+                    changed = True
+                    result["accepted_devices"] += 1
+
+            folders_cfg = cfg.get("folders")
+            if not isinstance(folders_cfg, list):
+                folders_cfg = []
+                cfg["folders"] = folders_cfg
+
+            eff = self._effective_folder_id(folder_id)
+            target_folder = None
+            for f in folders_cfg:
+                if not isinstance(f, dict):
+                    continue
+                if str(f.get("id", "") or "") in (eff, folder_id):
+                    target_folder = f
+                    break
+            if target_folder is None:
+                target_folder = {
+                    "id": folder_id,
+                    "label": "MC Shared World",
+                    "path": str(folder_path),
+                    "type": "sendreceive",
+                    "rescanIntervalS": 60,
+                    "devices": [],
+                }
+                folders_cfg.append(target_folder)
+                changed = True
+
+            # normalize folder path
+            if str(target_folder.get("path", "") or "") != str(folder_path):
+                target_folder["path"] = str(folder_path)
+                changed = True
+
+            folder_devices = target_folder.get("devices")
+            if not isinstance(folder_devices, list):
+                folder_devices = []
+                target_folder["devices"] = folder_devices
+                changed = True
+            folder_dev_ids = {str(it.get("deviceID", "") or "").strip() for it in folder_devices if isinstance(it, dict)}
+
+            for row in pending_folders:
+                fid = str(row.get("folderID", "") or "").strip()
+                did = str(row.get("deviceID", "") or "").strip()
+                if not fid or not did:
+                    continue
+                # accept only target folder id or alias.
+                if fid not in (folder_id, eff):
+                    result["skipped_folders"] += 1
+                    continue
+                if not _is_allowed(did):
+                    result["skipped_folders"] += 1
+                    continue
+                if did not in folder_dev_ids:
+                    folder_devices.append({"deviceID": did, "introducedBy": ""})
+                    folder_dev_ids.add(did)
+                    changed = True
+                    result["accepted_folders"] += 1
+
+            if changed:
+                put_r = self._request("PUT", "/rest/config", timeout=2.6, json=cfg)
+                if put_r.status_code not in (200, 204):
+                    return result
+                try:
+                    self._request("POST", "/rest/system/restart", timeout=1.6)
+                except Exception:
+                    pass
+                self._clear_cache()
+
+            result["changed"] = bool(changed)
+            result["ok"] = True
+            return result
+        except Exception:
+            return result
