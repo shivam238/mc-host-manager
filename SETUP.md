@@ -1,128 +1,81 @@
-# Setup Guide (User Friendly)
+# Setup Guide (Lightweight)
 
-## Step 1: Install Dependencies
+## 1. Prepare folders
 
-### Required
-- Java (`java -version` should work)
-- Python 3.11+ (`python3 --version` on Linux/macOS, `python --version` on Windows)
+You need 2 folders:
 
-### Recommended
-- Syncthing installed and running
+1. **Server Folder** (contains `server.jar` / `run.sh`)
+2. **Shared Folder** (Syncthing folder used for backups/world sync)
 
-## Step 2: Prepare Folders
-- Create a local server folder, example: `~/mc-server`
-- Create a shared sync folder, example: `~/mc-shared`
-- Keep these two folders different.
+Shared folder auto-uses:
 
-## Step 3: Launch App
+- `backups/`
+- `world_latest/`
+- `host.lock`
 
-### Linux/macOS
+## 2. Start app
+
 ```bash
 bash launch.sh
 ```
 
-### Windows
-```bat
-launch.bat
-```
+Open `http://localhost:7842`
 
-Open: `http://localhost:7842`
+## 3. Save settings
 
-## Step 4: Initial Dashboard Setup
-In setup/options panel fill:
-- User name
-- Server Folder (local server files path)
-- Shared Folder (Syncthing shared path)
-- RAM (2G/4G/6G/8G or custom MiB)
+In dashboard Settings:
 
-Save settings.
+- User Name
+- Project Name
+- Server Folder path
+- Shared Folder path
+- RAM
+- Max Players
+- Server JAR
+- Whitelist toggle
 
-Tip:
-- If anything looks wrong, open Setup Wizard and click **Auto Fix**.
-- Auto Fix now repairs common issues automatically:
-  - shared/server path recovery
-  - project key marker sync
-  - server jar auto-selection
-  - max players / whitelist sync to `server.properties`
-  - Syncthing ensure + scan trigger
+Click **Save**.
 
-## Step 5: Syncthing Pairing (Multi-PC)
-1. Open Syncthing UI: `http://localhost:8384`
-2. Add/accept remote device
-3. Share the same folder used as `Shared Folder` in app
-4. Accept incoming folder on other PC
+## 4. Start hosting
 
-Project key is auto-managed by app (`.mc_project_key`), manual key entry not needed.
+Click **START**.
 
-## Step 6: Daily Safe Flow
-- Start host from dashboard Start button
-- Stop host from dashboard Stop button
-- Restart only when server shows `RUNNING` (safe sequence is automatic)
-- Wait for finalize completion (backup + sync)
+Flow:
 
-Do not hard-kill during finalize unless emergency.
+- lock check
+- lock acquire
+- world copy from `shared/world_latest` (if exists)
+- server start
 
-## Multi-PC Friendly Control
-- Sidebar -> **Host on Another PC**
-- You can select an active synced machine and trigger:
-  - `Start There`
-  - `Stop There`
-- Requirement: both machines must run this app + Syncthing with same shared folder and project key.
+## 5. Stop hosting safely
 
-## If Folder Open Fails
-Go to **Access** panel and set optional manual paths:
-- Manual Server Folder
-- Manual Shared/World Folder
-- Manual Backups Folder
-- Manual Crash Reports Folder
+Click **STOP**.
 
-Click **Save Manual Paths** and retry folder action.
+Flow:
 
-## Build Executables
+- save + stop server
+- backup ZIP in `shared/backups`
+- sync world to `shared/world_latest`
+- lock release
 
-### Linux/macOS
-```bash
-bash build.sh
-```
+## 6. Multi-screen control
 
-### Windows
-```bat
-build.bat
-```
+To control from another screen/device:
 
-## Create Shareable App Package
-- One-click (recommended), Linux/macOS:
-```bash
-bash release.sh
-```
-- One-click (recommended), Windows:
-```bat
-release.bat
-```
+- open same dashboard URL
+- use same **Project Key** shown in Settings
 
-- Manual (advanced), Linux/macOS:
-```bash
-bash package_release.sh
-```
-- Manual (advanced), Windows:
-```bat
-package_release.bat
-```
+If key mismatches, control actions are blocked.
 
-This generates a ready-to-share archive in `release/` so you do not need to send full source code every time.
-It also generates a single-file installer:
-- Windows: `release/mc-host-manager-installer-windows.bat`
-- Linux: `release/mc-host-manager-installer-linux.sh`
+## 7. Syncthing
 
-## Common Issues
-- `Folder path is not configured`:
-  - Save correct paths in Options/Access
-- `Server start failed`:
-  - Verify Java and server jar path
-- `Syncthing not connected`:
-  - Check `http://localhost:8384` and pending device/folder approvals
+- App does not force heavy Syncthing automation
+- `Sync Now` triggers scan only
+- Keep Syncthing running externally for cross-device file sync
 
-## Auto Cleanup
-- App now auto-cleans stale temp/control files in background.
-- It does **not** delete active server data/world files.
+## Troubleshooting
 
+- **Locked by another host**: stop on host machine first
+- **Project key mismatch**: use same key on both screens
+- **No JAR found**: fix `Server JAR` in Settings
+- **Download failed**: stop server first, then retry

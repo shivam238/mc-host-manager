@@ -1,105 +1,121 @@
+from __future__ import annotations
+
 import json
-import socket
 import os
-from pathlib import Path
+import socket
 from datetime import datetime
+from pathlib import Path
 
-LOCK_EXPIRE_MINUTES = 10
+LOCK_LEASE_SECONDS = 45
 
 
-def get_lock_path(shared_dir):
-    return Path(shared_dir) / "host.lock"
+def get_lock_path(shared_dir: str | Path) -> Path:
+    return Path(shared_dir).expanduser() / "host.lock"
 
-def get_status_path(shared_dir):
-    return Path(shared_dir) / "current_host.txt"
 
-def get_lock(shared_dir):
-    p = get_lock_path(shared_dir)
-    if not p.exists():
+def get_status_path(shared_dir: str | Path) -> Path:
+    return Path(shared_dir).expanduser() / "current_host.txt"
+
+
+def _now_iso() -> str:
+    return datetime.now().isoformat()
+
+
+def _parse_iso(s: str | None):
+    if not s:
         return None
     try:
-        with open(p) as f:
-            data = json.load(f)
-        # Non-expiring lock mode is used while world sync is intentionally paused.
-        if bool(data.get("no_expire", False)):
-            data["expired"] = False
-            return data
-        # Expiry window is refreshed by heartbeat while host is active.
-        t = datetime.fromisoformat(data["time"])
-        age = (datetime.now() - t).total_seconds() / 60
-        if age > LOCK_EXPIRE_MINUTES:
-            data["expired"] = True
-        else:
-            data["expired"] = False
-        return data
-    except:
+        return datetime.fromisoformat(str(s).strip())
+    except Exception:
         return None
 
-def _best_local_ip():
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
-        if ip:
-            return ip
-    except Exception:
-        pass
-    try:
-        ip = socket.gethostbyname(socket.gethostname())
-        if ip and ip != "127.0.0.1":
-            return ip
-    except Exception:
-        pass
-    return "127.0.0.1"
 
-def _lock_payload(user_name, project_key="", no_expire=True, owner_node_id=""):
-    ip = _best_local_ip()
-    ui_url = f"http://{ip}:7842"
+def _best_ip() -> str:
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.connect(("8.8.8.8", 80))
+        ip = sock.getsockname()[0]
+        sock.close()
+        return ip or "127.0.0.1"
+    except Exception:
+        return "127.0.0.1"
+
+
+def _payload(user: str, project_key: str = "", owner_node_id: str = "", created_at: str = "") -> dict:
+    created = str(created_at or "").strip() or _now_iso()
+    now = _now_iso()
+    ip = _best_ip()
     return {
-        "host": user_name,
+        "host": str(user or "").strip(),
         "hostname": socket.gethostname(),
-        "owner_node_id": str(owner_node_id or ""),
+        "owner_node_id": str(owner_node_id or "").strip(),
         "ip": ip,
-        "ui_url": ui_url,
-        "project_key": str(project_key or ""),
-        "no_expire": bool(no_expire),
-        "time": datetime.now().isoformat(),
+        "ui_url": f"http://{ip}:7842",
+        "project_key": str(project_key or "").strip(),
+        "time": created,
+        "created_at": created,
+        "updated_at": now,
+        "lease_seconds": LOCK_LEASE_SECONDS,
+        "state": "active",
     }
 
 
-def _write_status(shared_dir, user_name, ui_url):
-    status_p = get_status_path(shared_dir)
-    status_p.parent.mkdir(parents=True, exist_ok=True)
-    with open(status_p, "w") as f:
-        f.write(f"{user_name} is hosting @ {ui_url}")
+def _age_seconds(data: dict) -> float:
+    t = _parse_iso(str(data.get("updated_at") or data.get("time") or ""))
+    if t is None:
+        return 10**9
+    return max(0.0, (datetime.now() - t).total_seconds())
 
 
-def create_lock(shared_dir, user_name, project_key="", no_expire=True, owner_node_id=""):
+def get_lock(shared_dir: str | Path):
+    p = get_lock_path(shared_dir)
+    if not p.exists() or not p.is_file():
+        return None
+    try:
+        d = json.loads(p.read_text(encoding="utf-8", errors="replace"))
+        if not isinstance(d, dict):
+            return None
+    except Exception:
+        return None
+
+    lease = int(d.get("lease_seconds", LOCK_LEASE_SECONDS) or LOCK_LEASE_SECONDS)
+    lease = max(10, min(3600, lease))
+    age = _age_seconds(d)
+    d["age_seconds"] = round(age, 2)
+    d["ttl_seconds"] = lease
+    d["expired"] = bool(age > lease)
+    return d
+
+
+def _write_status(shared_dir: str | Path, user: str, ui_url: str):
+    p = get_status_path(shared_dir)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        p.write_text(f"{user} is hosting @ {ui_url}", encoding="utf-8")
+    except Exception:
+        pass
+
+
+def create_lock(shared_dir: str | Path, user_name: str, project_key: str = "", no_expire=False, owner_node_id: str = ""):
     p = get_lock_path(shared_dir)
     p.parent.mkdir(parents=True, exist_ok=True)
-    data = _lock_payload(user_name, project_key, no_expire=no_expire, owner_node_id=owner_node_id)
 
-    # Refuse overwrite of any active lock (prevents dual-host race in multi-PC setups).
-    existing = get_lock(shared_dir)
-    if existing and not existing.get("expired", False):
-        ex_host = str(existing.get("host", "") or "")
-        ex_key = str(existing.get("project_key", "") or "")
-        ex_owner = str(existing.get("owner_node_id", "") or "")
-        # Strict project barrier.
-        if ex_key and ex_key != str(project_key or ""):
+    current = get_lock(shared_dir)
+    if current and not current.get("expired"):
+        who = str(current.get("host", "") or "another host")
+        key = str(current.get("project_key", "") or "")
+        if key and project_key and key != project_key:
             return False, "Lock belongs to another project key"
-        # When lock owner metadata exists and differs, reject.
-        if ex_owner and owner_node_id and ex_owner != str(owner_node_id):
-            return False, f"Locked by {ex_host or 'another host'}"
-        return False, f"Locked by {ex_host or 'another host'}"
+        return False, f"Locked by {who}"
 
-    # If stale lock exists, remove first, then atomically create.
+    # clear stale lock
     if p.exists():
         try:
             p.unlink()
         except Exception:
             pass
+
+    data = _payload(user_name, project_key, owner_node_id=owner_node_id)
     try:
         fd = os.open(str(p), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
         with os.fdopen(fd, "w") as f:
@@ -112,40 +128,43 @@ def create_lock(shared_dir, user_name, project_key="", no_expire=True, owner_nod
         return False, str(e)
 
 
-def refresh_lock(shared_dir, user_name, project_key="", owner_node_id=""):
+def refresh_lock(shared_dir: str | Path, user_name: str, project_key: str = "", owner_node_id: str = ""):
     p = get_lock_path(shared_dir)
-    existing = get_lock(shared_dir)
-    if not existing:
+    current = get_lock(shared_dir)
+    if not current:
         return False, "Lock missing"
-    ex_host = str(existing.get("host", ""))
-    ex_key = str(existing.get("project_key", "") or "")
-    ex_owner = str(existing.get("owner_node_id", "") or "")
-    if ex_host != str(user_name):
+    if str(current.get("host", "")) != str(user_name):
         return False, "Lock owned by another host"
-    if ex_owner and owner_node_id and ex_owner != str(owner_node_id):
-        return False, "Lock owned by another node"
-    if ex_key and ex_key != str(project_key or ""):
+    ex_key = str(current.get("project_key", "") or "")
+    if ex_key and project_key and ex_key != project_key:
         return False, "Project key mismatch"
-    data = _lock_payload(
+
+    data = _payload(
         user_name,
         project_key or ex_key,
-        no_expire=bool(existing.get("no_expire", False)),
-        owner_node_id=owner_node_id or ex_owner,
+        owner_node_id=owner_node_id or str(current.get("owner_node_id", "") or ""),
+        created_at=str(current.get("created_at") or current.get("time") or ""),
     )
+
     try:
-        with open(p, "w") as f:
-            json.dump(data, f, indent=2)
+        tmp = p.with_suffix(p.suffix + ".tmp")
+        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        tmp.replace(p)
         _write_status(shared_dir, user_name, data["ui_url"])
         return True, "lock refreshed"
     except Exception as e:
         return False, str(e)
 
-def remove_lock(shared_dir):
+
+def remove_lock(shared_dir: str | Path):
     p = get_lock_path(shared_dir)
-    if p.exists():
-        p.unlink()
-    
-    status_p = get_status_path(shared_dir)
-    status_p.parent.mkdir(parents=True, exist_ok=True)
-    with open(status_p, "w") as f:
-        f.write("Nobody is hosting")
+    try:
+        p.unlink(missing_ok=True)
+    except Exception:
+        pass
+    s = get_status_path(shared_dir)
+    s.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        s.write_text("Nobody is hosting", encoding="utf-8")
+    except Exception:
+        pass
