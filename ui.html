@@ -1,0 +1,695 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MC Host Manager</title>
+  <style>
+    :root {
+      --bg: #061327;
+      --bg2: #0b1f3d;
+      --card: #10284c;
+      --line: #1f487f;
+      --text: #d8e8ff;
+      --muted: #8ab0e4;
+      --ok: #37d27f;
+      --warn: #f2b84b;
+      --err: #ff5d75;
+      --cyan: #36c9ff;
+      --btn: #1f73ff;
+      --btn2: #1762df;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "Inter", system-ui, -apple-system, sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(1200px 800px at 20% -10%, #1a3f76 0%, transparent 55%),
+        radial-gradient(900px 700px at 100% 0%, #163563 0%, transparent 60%),
+        linear-gradient(180deg, var(--bg) 0%, #050f20 100%);
+      min-height: 100vh;
+      padding: 18px;
+    }
+    .wrap { max-width: 1180px; margin: 0 auto; }
+    .head {
+      background: linear-gradient(180deg, #122f57, #0f2648);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      margin-bottom: 14px;
+    }
+    .title { font-size: 1.65rem; font-weight: 700; margin: 0; }
+    .subtitle { margin: 3px 0 0; color: var(--muted); font-size: .92rem; }
+    .badge {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 7px 12px;
+      font-weight: 700;
+      font-size: .86rem;
+      background: #0c2243;
+      color: var(--muted);
+    }
+    .badge.ok { color: var(--ok); border-color: #278f59; background: #0f2a1e; }
+    .badge.warn { color: var(--warn); border-color: #9f6c23; background: #2f2312; }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 360px;
+      gap: 14px;
+      align-items: start;
+    }
+    .card {
+      background: linear-gradient(180deg, #0f2749, #0d2242);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+    }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .stat {
+      background: #0b203f;
+      border: 1px solid #214775;
+      border-radius: 10px;
+      padding: 10px;
+      min-height: 70px;
+    }
+    .k { font-size: .76rem; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+    .v { font-size: 1.15rem; font-weight: 700; margin-top: 4px; }
+    .v.ok { color: var(--ok); }
+    .v.warn { color: var(--warn); }
+    .v.err { color: var(--err); }
+    .v.cyan { color: var(--cyan); }
+
+    .actions {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    button, .btn-link {
+      border: 1px solid #2e6cb2;
+      background: linear-gradient(180deg, var(--btn), var(--btn2));
+      color: #eaf4ff;
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-weight: 700;
+      font-size: .92rem;
+      cursor: pointer;
+      transition: .15s ease;
+      text-decoration: none;
+      display: inline-flex;
+      justify-content: center;
+      align-items: center;
+      gap: 7px;
+      width: 100%;
+    }
+    button:hover, .btn-link:hover { filter: brightness(1.08); transform: translateY(-1px); }
+    button:disabled {
+      opacity: .55;
+      cursor: not-allowed;
+      transform: none;
+      filter: none;
+    }
+    .btn-danger { background: linear-gradient(180deg, #e74a67, #c63a54); border-color: #a92f46; }
+    .btn-good { background: linear-gradient(180deg, #33c87d, #249b61); border-color: #207e51; }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .metric {
+      background: #0b203f;
+      border: 1px solid #214775;
+      border-radius: 10px;
+      padding: 10px;
+    }
+    .metric-head { display: flex; justify-content: space-between; font-size: .86rem; color: var(--muted); margin-bottom: 6px; }
+    .bar {
+      height: 10px;
+      border-radius: 999px;
+      background: #102b53;
+      overflow: hidden;
+      border: 1px solid #1c4677;
+    }
+    .fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #2fd06f, #35c8ff);
+      transition: width .3s ease;
+    }
+
+    .console {
+      background: #050f1f;
+      border: 1px solid #1f4777;
+      border-radius: 10px;
+      padding: 10px;
+      height: 320px;
+      overflow: auto;
+      font-family: "Consolas", "Fira Code", monospace;
+      font-size: .88rem;
+      line-height: 1.4;
+      color: #9fd6ff;
+      white-space: pre-wrap;
+    }
+    .cmd {
+      margin-top: 8px;
+      display: grid;
+      grid-template-columns: 1fr 120px;
+      gap: 8px;
+    }
+    input, select {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid #275484;
+      background: #0b2243;
+      color: var(--text);
+      outline: none;
+    }
+    input:focus, select:focus { border-color: #3da2ff; }
+
+    .settings h3, .backups h3 { margin: 2px 0 12px; }
+    .row { margin-bottom: 8px; }
+    .row label { display: block; color: var(--muted); font-size: .82rem; margin-bottom: 4px; }
+    .row.inline {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .small { color: var(--muted); font-size: .8rem; }
+    .divider { height: 1px; background: #214775; margin: 10px 0; }
+
+    .backup-list {
+      max-height: 220px;
+      overflow: auto;
+      display: grid;
+      gap: 8px;
+    }
+    .backup-item {
+      border: 1px solid #214775;
+      background: #0a1f3d;
+      border-radius: 10px;
+      padding: 8px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      align-items: center;
+    }
+    .toast {
+      position: fixed;
+      right: 16px;
+      bottom: 16px;
+      max-width: 360px;
+      background: #0f2b52;
+      border: 1px solid #2f7ed4;
+      color: #e8f5ff;
+      border-radius: 12px;
+      padding: 11px 14px;
+      opacity: 0;
+      transform: translateY(12px);
+      pointer-events: none;
+      transition: .2s ease;
+      z-index: 100;
+    }
+    .toast.show { opacity: 1; transform: translateY(0); }
+    .toast.err { border-color: #b53f53; background: #3a1720; color: #ffdbe1; }
+
+    @media (max-width: 980px) {
+      .grid { grid-template-columns: 1fr; }
+      .actions { grid-template-columns: 1fr 1fr; }
+      .metrics { grid-template-columns: 1fr; }
+      .stats { grid-template-columns: 1fr 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="head">
+      <div>
+        <h1 id="title" class="title">Minecraft Server</h1>
+        <p class="subtitle">Lightweight Host Manager</p>
+      </div>
+      <div class="badge" id="badge">Offline</div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <div class="stats">
+          <div class="stat"><div class="k">Server</div><div id="s-state" class="v">Offline</div></div>
+          <div class="stat"><div class="k">Host</div><div id="s-host" class="v">-</div></div>
+          <div class="stat"><div class="k">Address</div><div id="s-addr" class="v cyan">-</div></div>
+          <div class="stat"><div class="k">Sync</div><div id="s-sync" class="v">-</div></div>
+          <div class="stat"><div class="k">Uptime</div><div id="s-uptime" class="v">--</div></div>
+          <div class="stat"><div class="k">Players</div><div id="s-players" class="v">0</div></div>
+        </div>
+
+        <div class="actions">
+          <button id="btn-main" class="btn-good" onclick="toggleHost()">⚡ START</button>
+          <button onclick="restartHost()">🔁 RESTART</button>
+          <button onclick="backupNow()">💾 BACKUP NOW</button>
+          <button onclick="syncNow()">🔄 SYNC NOW</button>
+          <button onclick="downloadServerFiles()">📦 DOWNLOAD FILES</button>
+        </div>
+
+        <div class="metrics">
+          <div class="metric">
+            <div class="metric-head"><span>Server CPU</span><span id="m-cpu-v">0%</span></div>
+            <div class="bar"><div id="m-cpu" class="fill"></div></div>
+          </div>
+          <div class="metric">
+            <div class="metric-head"><span>Server RAM</span><span id="m-mem-v">0%</span></div>
+            <div class="bar"><div id="m-mem" class="fill"></div></div>
+          </div>
+          <div class="metric">
+            <div class="metric-head"><span>Server I/O</span><span id="m-disk-v">0%</span></div>
+            <div class="bar"><div id="m-disk" class="fill"></div></div>
+          </div>
+        </div>
+
+        <div class="console" id="console">Waiting for server...</div>
+        <div class="cmd">
+          <input id="cmd" placeholder="say hello | list | whitelist add ..." onkeydown="if(event.key==='Enter') sendCmd()" />
+          <button onclick="sendCmd()">Send Command</button>
+        </div>
+      </div>
+
+      <div style="display:grid;gap:14px;">
+        <div class="card settings">
+          <h3>Settings</h3>
+          <div class="row">
+            <label>User Name</label>
+            <input id="f-user" />
+          </div>
+          <div class="row">
+            <label>Project Name</label>
+            <input id="f-project" />
+          </div>
+          <div class="row">
+            <label>Server Folder</label>
+            <input id="f-server" placeholder="/path/to/server" />
+          </div>
+          <div class="row">
+            <label>Shared Folder (Syncthing)</label>
+            <input id="f-shared" placeholder="/path/to/shared" />
+          </div>
+          <div class="row inline">
+            <div>
+              <label>RAM</label>
+              <select id="f-ram">
+                <option>2G</option>
+                <option selected>4G</option>
+                <option>6G</option>
+                <option>8G</option>
+                <option>10G</option>
+                <option>12G</option>
+              </select>
+            </div>
+            <div>
+              <label>Max Players</label>
+              <input id="f-max" type="number" min="1" max="500" value="20" />
+            </div>
+          </div>
+          <div class="row">
+            <label>Server JAR / run script</label>
+            <input id="f-jar" placeholder="server.jar" />
+          </div>
+          <div class="row">
+            <label style="display:flex;align-items:center;gap:8px;">
+              <input id="f-whitelist" type="checkbox" style="width:auto;"> Enable Whitelist
+            </label>
+          </div>
+          <div class="row">
+            <label>Project Key (for multi-screen control)</label>
+            <input id="f-key" />
+            <div class="small">Same key on both screens allows control from both.</div>
+          </div>
+          <div class="actions" style="grid-template-columns:1fr 1fr; margin-top:8px;">
+            <button onclick="saveSettings()">💾 SAVE</button>
+            <button onclick="forceClear()" class="btn-danger">🧹 FORCE CLEAR LOCK</button>
+          </div>
+          <div class="divider"></div>
+          <div class="actions" style="grid-template-columns:1fr 1fr 1fr;">
+            <button onclick="openFolder('server')">📁 Server</button>
+            <button onclick="openFolder('shared')">🌍 Shared</button>
+            <button onclick="openFolder('backups')">🗂 Backups</button>
+          </div>
+        </div>
+
+        <div class="card backups">
+          <h3>Backups</h3>
+          <div id="backup-list" class="backup-list">
+            <div class="small">No backups yet.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script>
+    let state = {
+      running: false,
+      server_state: 'offline',
+      project_key: '',
+      task: { running: false }
+    };
+
+    let statusBusy = false;
+    let logsBusy = false;
+    let taskBusy = false;
+    let statusTimer = null;
+
+    function toast(msg, isErr = false) {
+      const t = document.getElementById('toast');
+      t.textContent = String(msg || '');
+      t.className = 'toast show' + (isErr ? ' err' : '');
+      setTimeout(() => t.className = 'toast', 2800);
+    }
+
+    function getKey() {
+      return (document.getElementById('f-key').value || '').trim();
+    }
+
+    function withAuthHeaders(extra = {}) {
+      const h = { 'Content-Type': 'application/json', ...extra };
+      const key = getKey();
+      if (key) h['X-MC-Project-Key'] = key;
+      return h;
+    }
+
+    function fmtUptime(sec) {
+      const s = Math.max(0, Number(sec || 0));
+      const h = Math.floor(s / 3600);
+      const m = Math.floor((s % 3600) / 60);
+      const r = Math.floor(s % 60);
+      if (h > 0) return `${h}h ${m}m ${r}s`;
+      if (m > 0) return `${m}m ${r}s`;
+      return `${r}s`;
+    }
+
+    function setFill(id, v) {
+      const n = Math.max(0, Math.min(100, Math.round(Number(v || 0))));
+      const e = document.getElementById(id);
+      if (e) e.style.width = n + '%';
+      return n;
+    }
+
+    function applyStatus(d) {
+      state = d || state;
+      document.title = `${d.project_name || 'Minecraft Server'} - Host Manager`;
+      document.getElementById('title').textContent = d.project_name || 'Minecraft Server';
+
+      const badge = document.getElementById('badge');
+      if (d.task && d.task.running) {
+        badge.className = 'badge warn';
+        badge.textContent = (d.task.action || 'Working').toUpperCase();
+      } else if (d.running) {
+        badge.className = 'badge ok';
+        badge.textContent = 'Server Online';
+      } else {
+        badge.className = 'badge';
+        badge.textContent = 'Offline';
+      }
+
+      document.getElementById('s-state').textContent = d.server_state || (d.running ? 'running' : 'offline');
+      document.getElementById('s-state').className = 'v ' + ((d.running && !d.task?.running) ? 'ok' : (d.task?.running ? 'warn' : 'err'));
+      document.getElementById('s-host').textContent = d.lock?.host || d.user || '-';
+      document.getElementById('s-addr').textContent = d.running ? `${d.local_ip}:25565` : '---';
+      document.getElementById('s-sync').textContent = String(d.syncthing_status || 'stopped').toUpperCase();
+      document.getElementById('s-uptime').textContent = d.running ? fmtUptime(d.server_uptime_s || 0) : '--';
+      document.getElementById('s-players').textContent = `${d.players_count || 0}`;
+
+      const cpu = setFill('m-cpu', d.server_cpu_pct || 0);
+      const mem = setFill('m-mem', d.server_mem_pct || 0);
+      const disk = setFill('m-disk', d.server_disk_pct || 0);
+      document.getElementById('m-cpu-v').textContent = `${cpu}%`;
+      document.getElementById('m-mem-v').textContent = `${mem}%`;
+      document.getElementById('m-disk-v').textContent = `${disk}%`;
+
+      const main = document.getElementById('btn-main');
+      if (d.task && d.task.running) {
+        main.disabled = true;
+        main.className = '';
+        main.textContent = '⏳ WORKING...';
+      } else if (d.running) {
+        main.disabled = false;
+        main.className = 'btn-danger';
+        main.textContent = '⏹ STOP';
+      } else {
+        main.disabled = false;
+        main.className = 'btn-good';
+        main.textContent = '⚡ START';
+      }
+
+      if ((document.getElementById('f-user').value || '').trim() === '') {
+        document.getElementById('f-user').value = d.user || '';
+        document.getElementById('f-project').value = d.project_name || '';
+        document.getElementById('f-server').value = d.server_dir || '';
+        document.getElementById('f-shared').value = d.shared_dir || '';
+        document.getElementById('f-jar').value = d.server_jar || 'server.jar';
+        document.getElementById('f-ram').value = d.ram || '4G';
+        document.getElementById('f-max').value = String(d.max_players || 20);
+        document.getElementById('f-whitelist').checked = !!d.whitelist_enabled;
+        document.getElementById('f-key').value = d.project_key || '';
+      }
+
+      if (d.last_error) {
+        // show only once per change
+        if (!window.__lastErr || window.__lastErr !== d.last_error) {
+          window.__lastErr = d.last_error;
+          toast(d.last_error, true);
+        }
+      }
+    }
+
+    function scheduleStatus() {
+      if (statusTimer) clearTimeout(statusTimer);
+      let delay = 1100;
+      if (state.task?.running) delay = 320;
+      else if (state.running) delay = 650;
+      if (document.hidden) delay = Math.max(delay, 1700);
+      statusTimer = setTimeout(pollStatus, delay);
+    }
+
+    async function pollStatus() {
+      if (statusBusy) return;
+      statusBusy = true;
+      try {
+        const r = await fetch('/status');
+        const d = await r.json();
+        applyStatus(d);
+      } catch (e) {
+        toast('Backend offline', true);
+      } finally {
+        statusBusy = false;
+        scheduleStatus();
+      }
+    }
+
+    async function pollLogs() {
+      if (logsBusy) return;
+      if (!state.running && !state.task?.running) return;
+      logsBusy = true;
+      try {
+        const r = await fetch('/logs');
+        const d = await r.json();
+        const el = document.getElementById('console');
+        const atBottom = Math.abs(el.scrollHeight - el.scrollTop - el.clientHeight) < 30;
+        el.textContent = (d.logs || []).join('\n') || 'Waiting for server...';
+        if (atBottom) el.scrollTop = el.scrollHeight;
+      } catch (e) {}
+      finally { logsBusy = false; }
+    }
+
+    async function pollTask() {
+      if (taskBusy) return;
+      if (!state.task?.running) return;
+      taskBusy = true;
+      try {
+        const r = await fetch('/task');
+        const t = await r.json();
+        if (!t.running && t.error) toast(t.error, true);
+      } catch (e) {}
+      finally { taskBusy = false; }
+    }
+
+    async function loadBackups() {
+      try {
+        const r = await fetch('/backup/list');
+        const d = await r.json();
+        const list = Array.isArray(d.backups) ? d.backups : [];
+        const wrap = document.getElementById('backup-list');
+        if (!list.length) {
+          wrap.innerHTML = '<div class="small">No backups yet.</div>';
+          return;
+        }
+        wrap.innerHTML = list.map(b => `
+          <div class="backup-item">
+            <div>
+              <div><b>${b.time}</b></div>
+              <div class="small">${b.name} (${b.size_mb} MB)</div>
+            </div>
+            <a class="btn-link" href="/backup/get?name=${encodeURIComponent(b.name)}" download="${b.name}">Download</a>
+          </div>
+        `).join('');
+      } catch (e) {}
+    }
+
+    async function post(url, body = {}) {
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: withAuthHeaders(),
+        body: JSON.stringify({ ...body, project_key: getKey() })
+      });
+      return r.json();
+    }
+
+    async function toggleHost() {
+      if (state.task?.running) return;
+      const action = state.running ? 'stop' : 'start';
+      if (action === 'stop') {
+        const ok = confirm('Stop server safely? (save + backup + sync)');
+        if (!ok) return;
+      }
+      try {
+        const d = await post('/host/' + action, action === 'stop' ? { confirm_remote_stop: true } : {});
+        toast(d.msg || (d.ok ? 'OK' : 'Failed'), !d.ok);
+      } catch (e) {
+        toast('Request failed', true);
+      }
+      setTimeout(() => pollStatus(), 220);
+    }
+
+    async function restartHost() {
+      if (state.task?.running) return;
+      if (!confirm('Restart server safely?')) return;
+      try {
+        const d = await post('/host/restart', {});
+        toast(d.msg || (d.ok ? 'Restarting...' : 'Failed'), !d.ok);
+      } catch (e) {
+        toast('Request failed', true);
+      }
+      setTimeout(() => pollStatus(), 220);
+    }
+
+    async function backupNow() {
+      if (state.task?.running) return;
+      try {
+        const d = await post('/backup/now', {});
+        toast(d.msg || (d.ok ? 'Backup started' : 'Failed'), !d.ok);
+      } catch (e) {
+        toast('Backup request failed', true);
+      }
+      setTimeout(() => loadBackups(), 1200);
+    }
+
+    async function syncNow() {
+      try {
+        const d = await post('/sync/now', {});
+        toast(d.msg || (d.ok ? 'Sync triggered' : 'Sync failed'), !d.ok);
+      } catch (e) {
+        toast('Sync request failed', true);
+      }
+    }
+
+    async function sendCmd() {
+      const input = document.getElementById('cmd');
+      const cmd = (input.value || '').trim();
+      if (!cmd) return;
+      input.value = '';
+      try {
+        const d = await post('/command', { cmd });
+        if (!d.ok) toast(d.msg || 'Command failed', true);
+      } catch (e) {
+        toast('Command request failed', true);
+      }
+    }
+
+    async function saveSettings() {
+      const body = {
+        user: document.getElementById('f-user').value,
+        project_name: document.getElementById('f-project').value,
+        server_dir: document.getElementById('f-server').value,
+        shared_dir: document.getElementById('f-shared').value,
+        server_jar: document.getElementById('f-jar').value,
+        ram: document.getElementById('f-ram').value,
+        max_players: parseInt(document.getElementById('f-max').value || '20', 10),
+        whitelist_enabled: !!document.getElementById('f-whitelist').checked,
+      };
+      try {
+        const d = await post('/config/save', body);
+        toast(d.ok ? 'Settings saved' : (d.msg || 'Save failed'), !d.ok);
+      } catch (e) {
+        toast('Save failed', true);
+      }
+      setTimeout(() => pollStatus(), 250);
+    }
+
+    async function forceClear() {
+      if (!confirm('Force clear lock? Use only when host is definitely offline.')) return;
+      try {
+        const d = await post('/host/force', {});
+        toast(d.msg || (d.ok ? 'Lock cleared' : 'Failed'), !d.ok);
+      } catch (e) {
+        toast('Request failed', true);
+      }
+      setTimeout(() => pollStatus(), 250);
+    }
+
+    async function openFolder(target) {
+      try {
+        const r = await fetch('/open-folder?target=' + encodeURIComponent(target));
+        const d = await r.json();
+        if (!d.ok) toast(d.msg || 'Open failed', true);
+      } catch (e) {
+        toast('Open failed', true);
+      }
+    }
+
+    async function downloadServerFiles() {
+      try {
+        const r = await fetch('/server/download');
+        if (!r.ok) {
+          const txt = await r.text();
+          toast(txt || `Download failed (${r.status})`, true);
+          return;
+        }
+        const blob = await r.blob();
+        const cd = r.headers.get('content-disposition') || '';
+        let name = 'server_files.zip';
+        const m = cd.match(/filename="?([^";]+)"?/i);
+        if (m && m[1]) name = m[1];
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = name;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1200);
+      } catch (e) {
+        toast('Download failed', true);
+      }
+    }
+
+    setInterval(pollLogs, 1500);
+    setInterval(pollTask, 650);
+    setInterval(loadBackups, 11000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) pollStatus(); });
+
+    pollStatus();
+    loadBackups();
+  </script>
+</body>
+</html>
