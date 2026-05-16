@@ -244,6 +244,17 @@ function setFill(id, v) {
 
 function applyStatus(d) {
   state = d || state;
+  // Track the remote host's IP for remote console streaming
+  // Priority: Firebase lock IP > members list hosting IP
+  let resolvedIp = d.remote_lock_peer || '';
+  if (!resolvedIp && d.members) {
+    const hostMember = d.members.find(m => m.hosting && m.ip);
+    if (hostMember) resolvedIp = hostMember.ip;
+  }
+  if (resolvedIp) state.hostIp = resolvedIp;
+  // If we are the host, use our own local IP
+  if (d.running) state.hostIp = d.local_ip || '';
+
   document.title = (d.project_name || 'Minecraft Server') + ' - Host Manager';
   var titleEl = document.getElementById('title');
   if (titleEl) titleEl.textContent = d.project_name || 'Minecraft Server';
@@ -502,14 +513,32 @@ async function pollStatus() {
 
 async function pollLogs() {
   if (logsBusy) return;
-  if (!state.running && !state.task?.running) return;
+  const isRemote = state.server_state === 'remote-running';
+  const isLocal  = state.running || state.task?.running;
+  if (!isLocal && !isRemote) return;
   logsBusy = true;
   try {
-    const r = await fetch('/logs');
-    const d = await r.json();
+    let logs = [];
+    if (isRemote && state.hostIp) {
+      // Use our own backend as a proxy to fetch logs from the remote host
+      try {
+        const r = await fetch(`/remote/logs?ip=${encodeURIComponent(state.hostIp)}`);
+        const d = await r.json();
+        logs = d.logs || [];
+      } catch (e) {
+        logs = [
+          `[Remote console] Connecting to ${state.hostIp} via proxy...`,
+          `[Error] ${e.message || e}`
+        ];
+      }
+    } else {
+      const r = await fetch('/logs');
+      const d = await r.json();
+      logs = d.logs || [];
+    }
     const el = document.getElementById('console');
     const atBottom = Math.abs(el.scrollHeight - el.scrollTop - el.clientHeight) < 30;
-    el.textContent = (d.logs || []).join('\n') || 'Waiting for server...';
+    el.textContent = logs.join('\n') || 'Waiting for server...';
     if (atBottom) el.scrollTop = el.scrollHeight;
   } catch (e) {}
   finally { logsBusy = false; }

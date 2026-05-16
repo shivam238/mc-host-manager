@@ -42,6 +42,11 @@ from utils.group_manager import create_server_group, join_server_group, format_i
 from utils import dependency_manager
 from utils import world_transfer
 
+try:
+    import requests
+except ImportError:
+    requests = None
+
 def read_json(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
     length = int(handler.headers.get("Content-Length", 0) or 0)
     if length <= 0:
@@ -186,6 +191,7 @@ def get_status(cfg: dict[str, Any]) -> dict[str, Any]:
                             "hosting": True,
                             "running": True,
                             "user": l_data.get("user", "Someone"),
+                            "hostname": l_data.get("hostname", ""),
                             "peer_ip": l_data.get("ip", ""),
                             "node_id": l_data.get("node_id", ""),
                             "lock": {"host": l_data.get("user"), "expired": False}
@@ -473,6 +479,24 @@ class APIHandler(BaseHTTPRequestHandler):
 
         if self.path.startswith("/logs") and self.path != "/logs/details":
             self._json(cache_get("logs:tail", 0.8, lambda: {"logs": mc_server.get_logs()}))
+            return
+
+        if self.path.startswith("/remote/logs"):
+            from urllib.parse import parse_qs, urlparse
+            qs = parse_qs(urlparse(self.path).query)
+            ip = qs.get("ip", [""])[0]
+            if not ip:
+                self._json({"logs": ["Error: Missing IP for remote logs"]})
+                return
+            try:
+                # Proxy the request to the remote manager
+                r = requests.get(f"http://{ip}:7842/logs", timeout=2.0)
+                if r.status_code == 200:
+                    self._json(r.json())
+                else:
+                    self._json({"logs": [f"Error: Remote manager returned {r.status_code}"]})
+            except Exception as e:
+                self._json({"logs": [f"Error connecting to {ip}: {str(e)}"]})
             return
 
         if self.path == "/task":
@@ -1036,7 +1060,29 @@ class APIHandler(BaseHTTPRequestHandler):
                 self._json({"ok": False, "msg": "Invalid command."})
                 return
             if not mc_server.is_running():
-                self._json({"ok": False, "msg": "Server is offline."})
+                # Try to proxy command to remote host
+                remote_lock, _, _ = poll_remote_hosting(cfg, st_api.list_peers())
+                remote_ip = remote_lock.get("peer_ip") if remote_lock else ""
+                
+                success = False
+                if remote_ip:
+                    try:
+                        r = requests.post(f"http://{remote_ip}:7842/command", json=body, timeout=2.0)
+                        self._json(r.json())
+                        success = True
+                    except Exception as e:
+                        pass # Fallback to Firebase
+                
+                if not success:
+                    fb_url = cfg.get("firebase_url")
+                    sid = cfg.get("server_id")
+                    if fb_url and sid:
+                        from utils import matchmaker
+                        target_node = remote_lock.get("node_id") if remote_lock else "ANY"
+                        matchmaker.send_signal(fb_url, sid, f"mc:{cmd}", target_node=target_node, sender_node=get_node_id())
+                        self._json({"ok": True, "msg": "Sent via Firebase (Network was blocked)"})
+                    else:
+                        self._json({"ok": False, "msg": "Server is offline (No remote host or Firebase)."})
                 return
             ok = mc_server.send_command(cmd)
             self._json({"ok": bool(ok), "msg": "Sent" if ok else "Failed"})

@@ -144,20 +144,31 @@ def monitor_lock_heartbeat() -> None:
 
             # 1. Check for remote signals (e.g. Stop command from a peer)
             sig = matchmaker.check_signal(fb_url, sid)
-            if sig and sig.get("cmd") == "stop":
+            if sig:
+                cmd_str = sig.get("cmd", "")
                 my_id = get_node_id()
                 sender = sig.get("sender")
+                target = sig.get("target")
+
                 if sender != my_id:
-                    target = sig.get("target")
-                    if not target or target == my_id or target == "ANY":
-                        matchmaker.clear_signal(fb_url, sid)
-                        print(f"[SIGNAL] Remote STOP received from {sender}. Shutting down...")
-                        # Immediately mark as inactive so crash-recovery doesn't trigger
-                        with host_lock:
-                            host_state["active"] = False
-                        from utils.flow_manager import finalize_stop_flow
-                        threading.Thread(target=lambda: finalize_stop_flow(cfg, reason="remote_signal"), daemon=True).start()
-                        continue
+                    if cmd_str == "stop":
+                        if not target or target == my_id or target == "ANY":
+                            matchmaker.clear_signal(fb_url, sid)
+                            print(f"[SIGNAL] Remote STOP received from {sender}. Shutting down...")
+                            # Immediately mark as inactive so crash-recovery doesn't trigger
+                            with host_lock:
+                                host_state["active"] = False
+                            from utils.flow_manager import finalize_stop_flow
+                            threading.Thread(target=lambda: finalize_stop_flow(cfg, reason="remote_signal"), daemon=True).start()
+                            continue
+                    elif cmd_str.startswith("mc:"):
+                        if not target or target == my_id or target == "ANY":
+                            matchmaker.clear_signal(fb_url, sid)
+                            mc_cmd = cmd_str[3:]
+                            print(f"[SIGNAL] Remote command received: {mc_cmd}")
+                            if mc_server.is_running():
+                                mc_server.send_command(mc_cmd)
+                            continue
 
             # 2. Check for Lock Ownership (Conflict Prevention)
             # If we are hosting but the lock in Firebase belongs to someone else, we must stop.
