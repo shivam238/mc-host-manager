@@ -91,9 +91,11 @@ def monitor_members_presence() -> None:
             if fb_url and sid:
                 from utils.config import get_node_id, load_user, get_local_ip
                 import socket
+                hname = socket.gethostname().lower().split('.')[0]
                 matchmaker.update_presence(
-                    fb_url, sid, get_node_id(),
+                    fb_url, sid, hname,
                     {
+                        "node_id": get_node_id(),
                         "user": load_user(),
                         "hostname": socket.gethostname(),
                         "ip": get_local_ip(),
@@ -150,6 +152,9 @@ def monitor_lock_heartbeat() -> None:
                     if not target or target == my_id or target == "ANY":
                         matchmaker.clear_signal(fb_url, sid)
                         print(f"[SIGNAL] Remote STOP received from {sender}. Shutting down...")
+                        # Immediately mark as inactive so crash-recovery doesn't trigger
+                        with host_lock:
+                            host_state["active"] = False
                         from utils.flow_manager import finalize_stop_flow
                         threading.Thread(target=lambda: finalize_stop_flow(cfg, reason="remote_signal"), daemon=True).start()
                         continue
@@ -165,6 +170,8 @@ def monitor_lock_heartbeat() -> None:
                 # If lock is fresh (within 45s) and NOT ours
                 if owner and owner != get_node_id() and (now - lock_time) < 45:
                     print(f"[CONFLICT] Lock stolen by {owner}! Shutting down to prevent split-brain...")
+                    with host_lock:
+                        host_state["active"] = False
                     from utils.flow_manager import finalize_stop_flow
                     threading.Thread(target=lambda: finalize_stop_flow(cfg, reason="conflict_shutdown"), daemon=True).start()
                     continue
@@ -241,12 +248,19 @@ if __name__ == "__main__":
         ensure_project_key(cfg)
 
     shared = normalize_path(cfg.get("shared_dir", ""))
-    if shared and cfg.get("server_id"):
+    sid = str(cfg.get("server_id", "")).strip()
+    if shared and sid:
+        fb_url = cfg.get("firebase_url", "")
+        if fb_url:
+            from utils import matchmaker
+            from utils.config import get_node_id
+            matchmaker.cleanup_stale_presence(fb_url, sid, get_node_id())
+
         try:
             st_api.ensure_folder(get_syncthing_folder(cfg), shared)
             members_registry.touch_presence(
                 shared,
-                server_id=str(cfg.get("server_id", "")),
+                server_id=sid,
                 hosting=False,
             )
         except Exception:

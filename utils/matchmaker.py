@@ -159,6 +159,32 @@ def acquire_lock(firebase_url: str, server_id: str, user_data: dict[str, Any]) -
         return False, str(e)
 
 
+def cleanup_stale_presence(firebase_url: str, server_id: str, my_node_id: str) -> None:
+    """Remove any presence/lock entries for this host that don't match our current ID."""
+    if not firebase_url or not server_id or requests is None: return
+    try:
+        import socket
+        my_host = socket.gethostname()
+        
+        # 1. Cleanup Presence
+        p_url = f"{_get_base_url(firebase_url)}/presence/{server_id.upper()}.json"
+        r = requests.get(p_url, timeout=5).json()
+        if r and isinstance(r, dict):
+            for pid, data in r.items():
+                if data.get("hostname") == my_host and data.get("node_id") != my_node_id:
+                    requests.delete(f"{_get_base_url(firebase_url)}/presence/{server_id.upper()}/{pid}.json", timeout=2)
+                    print(f"[CLEANUP] Removed stale presence: {pid}")
+
+        # 2. Cleanup Lock (If we are sure it's ours from a previous session)
+        l_url = f"{_get_base_url(firebase_url)}/locks/{server_id.upper()}.json"
+        l_data = requests.get(l_url, timeout=5).json()
+        if l_data and isinstance(l_data, dict):
+            if l_data.get("hostname") == my_host and l_data.get("node_id") != my_node_id:
+                requests.delete(l_url, timeout=2)
+                print(f"[CLEANUP] Force-released stale lock from {my_host}")
+    except Exception:
+        pass
+
 def release_lock(firebase_url: str, server_id: str, node_id: str) -> None:
     """Release the host role."""
     if not firebase_url or not server_id or requests is None: return

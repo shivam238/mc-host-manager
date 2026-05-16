@@ -75,18 +75,30 @@ def evaluate_start_gate(
             (rlock or {}).get("host", "") or remote_lock.get("user", "") or ""
         ).strip()
         peer_ip = str(remote_lock.get("peer_ip", "") or "").strip()
+        remote_host = str(remote_lock.get("hostname", "") or "").strip()
         peer_hosting = bool(remote_lock.get("hosting")) or bool(remote_lock.get("running"))
         if rlock and rlock.get("expired"):
             peer_hosting = bool(remote_lock.get("running"))
-        if peer_hosting and remote_user and remote_user.lower() != user.lower():
-            out["can_start"] = False
-            out["remote_host"] = remote_user
-            hint = f" ({peer_ip})" if peer_ip else ""
-            out["start_block_reason"] = (
-                f"{remote_user} is hosting on another PC{hint}. "
-                "Use “Yahan host karo” after they STOP, or ask them to stop."
-            )
+
+        import socket
+        my_host = socket.gethostname().lower().split('.')[0]
+        rem_user_clean = remote_user.lower().split('.')[0]
+        rem_host_clean = remote_host.lower().split('.')[0]
+
+        # BYPASS: If the lock belongs to our own machine, never block.
+        if rem_user_clean == my_host or rem_host_clean == my_host:
             return out
+
+        if peer_hosting and remote_user:
+            if remote_user.lower() != user.lower():
+                out["can_start"] = False
+                out["remote_host"] = remote_user
+                hint = f" ({peer_ip})" if peer_ip else ""
+                out["start_block_reason"] = (
+                    f"{remote_user} is hosting on another PC{hint}. "
+                    "Use “Yahan host karo” after they STOP, or ask them to stop."
+                )
+                return out
 
     if isolated and strict:
         out["can_start"] = False

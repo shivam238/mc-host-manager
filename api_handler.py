@@ -175,7 +175,11 @@ def get_status(cfg: dict[str, Any]) -> dict[str, Any]:
                 now = int(time.time())
                 ls = l_data.get("t", 0)
                 if (now - ls) < 45: # Lock is active
-                    if l_data.get("node_id") != get_node_id():
+                    import socket
+                    my_host = socket.gethostname().lower().split('.')[0]
+                    rem_host = str(l_data.get("hostname") or l_data.get("user") or "").lower().split('.')[0]
+                    
+                    if l_data.get("node_id") != get_node_id() and rem_host != my_host:
                         # Override remote_lock with Firebase data for instant global block
                         remote_lock = {
                             "ok": True,
@@ -186,6 +190,21 @@ def get_status(cfg: dict[str, Any]) -> dict[str, Any]:
                             "node_id": l_data.get("node_id", ""),
                             "lock": {"host": l_data.get("user"), "expired": False}
                         }
+
+    import socket
+    my_host = socket.gethostname().lower().split('.')[0]
+    from utils.config import get_local_ip
+    my_ip = get_local_ip()
+    
+    # 2. Final check: If the lock IP matches our IP, it's definitely US.
+    if remote_lock and remote_lock.get("hosting"):
+        rem_user = str(remote_lock.get("user") or "").lower().split('.')[0]
+        rem_host = str(remote_lock.get("hostname") or "").lower().split('.')[0]
+        rem_ip = str(remote_lock.get("peer_ip") or "")
+        
+        if rem_user == my_host or rem_host == my_host or rem_ip == my_ip:
+            # It's us! Wipe the remote_lock block
+            remote_lock = {"ok": True, "hosting": False, "running": False}
 
     gate = evaluate_start_gate(
         cfg,

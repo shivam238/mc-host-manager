@@ -30,7 +30,7 @@ APP_DATA_DIR = get_user_data_root() / "app_data"
 APP_DATA_DIR.mkdir(parents=True, exist_ok=True)
 CONFIG_FILE = APP_DATA_DIR / "settings.json"
 USER_FILE = APP_DATA_DIR / "user.json"
-NODE_FILE = APP_DATA_DIR / "node_id.txt"
+NODE_FILE = Path.home() / ".mc_node_id"
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "project_name": "Minecraft Server",
@@ -164,15 +164,12 @@ def save_user(name: str) -> str:
     return nm
 
 def get_node_id() -> str:
+    """Gets or generates a unique ID for this machine based on hostname."""
     try:
-        if NODE_FILE.exists():
-            val = NODE_FILE.read_text(encoding="utf-8", errors="replace").strip()
-            if val:
-                return val
-        import secrets
-        nid = secrets.token_hex(8)
-        NODE_FILE.write_text(nid, encoding="utf-8")
-        return nid
+        import socket
+        import hashlib
+        h = socket.gethostname()
+        return hashlib.md5(h.encode()).hexdigest()[:12]
     except Exception:
         return "local-node"
 

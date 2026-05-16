@@ -98,7 +98,21 @@ def touch_presence(
         members = data.get("members")
         if not isinstance(members, dict):
             members = {}
-        members[node] = {
+
+        hname = socket.gethostname().lower().split('.')[0]
+
+        # Purge ALL old hex-keyed entries (old Node IDs) for our hostname.
+        # This permanently prevents ghost "hosting=true" records from old sessions.
+        stale_keys = [
+            k for k, v in members.items()
+            if isinstance(v, dict)
+            and v.get("hostname", "").lower().split('.')[0] == hname
+            and k != hname  # keep only the hostname-keyed entry
+        ]
+        for k in stale_keys:
+            del members[k]
+
+        members[hname] = {
             "node_id": node,
             "user": user,
             "hostname": socket.gethostname(),
