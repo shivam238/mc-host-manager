@@ -145,6 +145,10 @@ def resolve_layout(cfg: dict[str, Any], *, create_shared: bool = True) -> dict[s
 
     if server_dir and (not shared_dir or shared_dir == server_dir):
         shared_dir = default_shared_for_server(server_dir)
+    elif not server_dir and not shared_dir:
+        # No server dir found (e.g. joiner PC) — create default shared in home
+        from pathlib import Path as _P
+        shared_dir = str(_P.home() / "mc-host-shared")
 
     out["shared_dir"] = shared_dir
 

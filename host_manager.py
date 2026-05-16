@@ -68,6 +68,7 @@ def monitor_ready_and_recover() -> None:
         run_task("recovering", crash_task)
 
 def monitor_members_presence() -> None:
+    from utils import matchmaker
     while True:
         time.sleep(12.0)
         try:
@@ -78,11 +79,20 @@ def monitor_members_presence() -> None:
             hosting = False
             with host_lock:
                 hosting = bool(host_state.get("active")) and mc_server.is_running()
+            sid = str(cfg.get("server_id", "") or "")
             members_registry.touch_presence(
                 shared,
-                server_id=str(cfg.get("server_id", "") or ""),
+                server_id=sid,
                 hosting=hosting,
             )
+            
+            # Matchmaking: Auto-accept peers if we are the host
+            fb_url = cfg.get("firebase_url", "")
+            if hosting and fb_url and sid:
+                ok, _, peers = matchmaker.fetch_peer_invites(fb_url, sid)
+                if ok and peers:
+                    for peer_payload in peers:
+                        st_api.apply_invite_payload(peer_payload)
         except Exception:
             pass
 

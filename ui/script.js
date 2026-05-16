@@ -2,7 +2,13 @@ let state = {
   running: false,
   server_state: 'offline',
   project_key: '',
-  task: { running: false }
+  task: { running: false },
+  can_start: true,
+  start_block_reason: '',
+  world_conflict: false,
+  world_conflict_msg: '',
+  suggested_host_ip: '',
+  sync_isolated: false
 };
 
 let statusBusy = false;
@@ -93,6 +99,9 @@ async function joinFriend() {
       wizardPinnedOpen = false;
       document.getElementById('join-input').value = '';
       document.getElementById('panel-join')?.classList.add('hidden');
+      if (!raw.includes(':') && raw.length <= 12) {
+        toastOnce('join-sync-hint', 'Group join OK. World sync ke liye host ka full invite (Copy invite) dubara paste karo.', false);
+      }
       if (d.server_id) {
         state.server_id = d.server_id;
         const hero = document.getElementById('hero-server-id');
@@ -339,6 +348,8 @@ function applyStatus(d) {
   if (fw) fw.checked = !!d.whitelist_enabled;
   const fk = document.getElementById('f-key');
   if (fk && !fk.value.trim()) fk.value = d.project_key || '';
+  const ffb = document.getElementById('f-firebase');
+  if (ffb && !ffb.value.trim()) ffb.value = d.firebase_url || '';
 
   if (d.server_id && d.server_id_on_disk && !d.server_id_synced) {
     toastOnce('sid-mismatch', `Syncing to Server ID ${d.server_id}… save or join again if needed.`, true);
@@ -367,9 +378,41 @@ function renderMembers(d) {
     const tag = m.hosting ? 'hosting' : (m.online ? 'online' : 'offline');
     return `<div class="member-row ${m.online ? 'on' : ''}">
       <span><b>${dot} ${m.user || 'Unknown'}</b></span>
-      <span class="small">${m.hostname || ''} · ${tag}</span>
+      <span class="small">${m.hostname || ''} · ${tag}${m.ip ? ' · ' + m.ip : ''}</span>
     </div>`;
   }).join('');
+
+  const lanInput = document.getElementById('lan-host-ip');
+  const hostRow = rows.find((m) => m.hosting && m.ip);
+  const suggested = String(d.suggested_host_ip || '').trim();
+  if (lanInput) {
+    if (hostRow?.ip && !lanInput.value.trim()) lanInput.value = hostRow.ip;
+    else if (suggested && !lanInput.value.trim()) lanInput.value = suggested;
+  }
+
+  const switchBtn = document.querySelector('.btn-switch-host');
+  const switchHint = document.getElementById('switch-host-hint');
+  if (switchBtn) {
+    switchBtn.disabled = !!(d.running || d.task?.running);
+  }
+  if (switchHint) {
+    const remote = String(d.remote_host || '').trim();
+    if (!d.running && remote) {
+      switchHint.textContent = `${remote} abhi host kar raha hai — STOP ke baad “Yahan host karo” dabao.`;
+      switchHint.className = 'small switch-hint show';
+    } else if (!d.running && d.sync_isolated && d.auto_world_before_start) {
+      switchHint.textContent = 'Auto: friend ka IP + world sync, phir yahan server start.';
+      switchHint.className = 'small switch-hint show';
+    } else {
+      switchHint.textContent = '';
+      switchHint.className = 'small switch-hint hidden';
+    }
+  }
+
+  const strictEl = document.getElementById('f-strict-sync');
+  if (strictEl) strictEl.checked = !!d.strict_sync_gate;
+  const autoWorldEl = document.getElementById('f-auto-world');
+  if (autoWorldEl) autoWorldEl.checked = d.auto_world_before_start !== false;
 }
 
 async function detectServer() {
@@ -484,6 +527,15 @@ async function post(url, body = {}) {
   return r.json();
 }
 
+function hostStartBody(extra = {}) {
+  const hostIp = (document.getElementById('lan-host-ip')?.value || state.suggested_host_ip || '').trim();
+  return {
+    host_ip: hostIp,
+    auto_pull: document.getElementById('f-auto-world')?.checked !== false,
+    ...extra
+  };
+}
+
 async function toggleHost() {
   if (state.task?.running) return;
   const action = state.running ? 'stop' : 'start';
@@ -493,15 +545,65 @@ async function toggleHost() {
   } else if (state.can_start === false) {
     toast(state.start_block_reason || 'Cannot start right now.', true);
     return;
+  } else if (state.world_conflict) {
+    const ok = confirm(state.world_conflict_msg || 'Local world alag hai — overwrite OK?');
+    if (!ok) return;
   }
   try {
-    const body = action === 'stop' ? { confirm_remote_stop: true } : {};
+    let body = action === 'stop' ? { confirm_remote_stop: true } : hostStartBody();
+    if (action === 'start' && state.world_conflict) body.ack_world_overwrite = true;
+    if (action === 'start' && state.sync_isolated && !state.start_block_reason?.includes('hosting')) {
+      body.ack_isolated_risk = true;
+    }
     const d = await post('/host/' + action, body);
     toast(d.msg || (d.ok ? 'OK' : 'Failed'), !d.ok);
   } catch (e) {
     toast('Request failed', true);
   }
   setTimeout(() => pollStatus(), 220);
+}
+
+async function switchHostHere() {
+  if (state.task?.running || state.running) {
+    toast('Pehle apna server band karo', true);
+    return;
+  }
+  const hostIp = (document.getElementById('lan-host-ip')?.value || state.suggested_host_ip || '').trim();
+  let body = { host_ip: hostIp, auto_start: true };
+  if (state.world_conflict) {
+    const ok = confirm(state.world_conflict_msg || 'World overwrite OK?');
+    if (!ok) return;
+    body.ack_world_overwrite = true;
+  }
+  const remote = String(state.start_block_reason || '').includes('hosting');
+  if (remote) {
+    const ok2 = confirm('Doosra PC abhi host kar sakta hai — unse STOP karwao. Phir yahan switch hoga. Continue?');
+    if (!ok2) return;
+  }
+  toast('Switch host — world sync + start...');
+  try {
+    const d = await post('/host/switch', body);
+    toast(d.msg || (d.ok ? 'Started' : 'Failed'), !d.ok);
+  } catch (e) {
+    toast('Switch failed — same network / host STOP?', true);
+  }
+  setTimeout(() => pollStatus(), 280);
+}
+
+async function pullWorldAuto() {
+  if (state.running || state.task?.running) {
+    toast('Pehle apna server STOP karo', true);
+    return;
+  }
+  const hostIp = (document.getElementById('lan-host-ip')?.value || state.suggested_host_ip || '').trim();
+  toast('Auto world sync...');
+  try {
+    const d = await post('/sync/world/auto', { host_ip: hostIp, wait_host_stop: true });
+    toast(d.msg || (d.ok ? 'Sync started' : 'Failed'), !d.ok);
+  } catch (e) {
+    toast('Auto sync fail', true);
+  }
+  setTimeout(() => pollStatus(), 300);
 }
 
 async function restartHost() {
@@ -559,7 +661,11 @@ async function saveSettings() {
     server_jar: document.getElementById('f-jar').value,
     ram: document.getElementById('f-ram').value,
     max_players: parseInt(document.getElementById('f-max').value || '20', 10),
-    whitelist_enabled: !!document.getElementById('f-whitelist').checked,
+    whitelist_enabled: !!document.getElementById('f-whitelist')?.checked,
+    strict_sync_gate: !!document.getElementById('f-strict-sync')?.checked,
+    auto_world_before_start: !!document.getElementById('f-auto-world')?.checked,
+    http_lock_enabled: true,
+    firebase_url: (document.getElementById('f-firebase')?.value || '').trim(),
   };
   try {
     const d = await post('/config/save', body);
@@ -625,6 +731,49 @@ async function downloadServerFiles() {
 
 let inviteCache = { invite: '', invite_code: '', device_id: '' };
 
+let depsPollGen = 0;
+
+async function installDeps() {
+  const el = document.getElementById('deps-banner');
+  if (el) {
+    el.classList.remove('hidden');
+    el.textContent = '⏳ Syncthing install ho raha hai (1-2 min)...';
+  }
+  try {
+    const d = await post('/deps/install', {});
+    toast(d.msg || 'Install shuru...', false);
+    pollDepsUntilReady(++depsPollGen);
+  } catch (e) {
+    toast('App connect nahi — host_manager chal raha hai?', true);
+  }
+}
+
+function pollDepsUntilReady(gen) {
+  let n = 0;
+  const tick = async () => {
+    if (gen !== depsPollGen) return;
+    n += 1;
+    try {
+      const r = await fetch('/deps/status');
+      const d = await r.json();
+      renderDeps(d);
+      if (d.syncthing_running) {
+        toast('Syncthing ready ✓');
+        pollStatus();
+        loadInvite();
+        return;
+      }
+      if (!d.installing && d.last_error && n > 2) {
+        toast('Syncthing fail — LAN world download use karo (neeche)', true);
+        return;
+      }
+    } catch (e) {}
+    if (n < 60) setTimeout(tick, 2000);
+    else toast('Syncthing slow — LAN download try karo', true);
+  };
+  setTimeout(tick, 1500);
+}
+
 function renderDeps(deps) {
   const el = document.getElementById('deps-banner');
   if (!el || !deps) return;
@@ -639,11 +788,40 @@ function renderDeps(deps) {
   if (!deps.requests_ok) missing.push('requests');
   if (!missing.length) {
     el.classList.add('hidden');
-    el.textContent = '';
+    el.innerHTML = '';
     return;
   }
   el.classList.remove('hidden');
-  el.textContent = `⚠ Missing: ${missing.join(', ')} — auto-install try ho raha hai...`;
+  const err = (deps.last_error || '').trim();
+  const hint = err ? ` ${err}` : '';
+  el.innerHTML =
+    `⚠ Missing: ${missing.join(', ')}.${hint} ` +
+    `<button type="button" class="btn-linkish" onclick="installDeps()">Ab install karo</button>`;
+}
+
+async function pullWorldLan() {
+  if (state.running || state.task?.running) {
+    toast('Pehle apna server STOP karo', true);
+    return;
+  }
+  const hostIp = (document.getElementById('lan-host-ip')?.value || '').trim();
+  if (!hostIp) {
+    toast('Host ka IP likho (Fedora wale PC ka)', true);
+    return;
+  }
+  const sid = state.server_id || document.getElementById('hero-server-id')?.textContent || '';
+  if (!sid || sid === '—') {
+    toast('Pehle Join friend se host ka Server ID set karo', true);
+    return;
+  }
+  toast('World download ho rahi hai...');
+  try {
+    const d = await post('/sync/world/lan/pull', { host_ip: hostIp, server_id: sid });
+    toast(d.msg || (d.ok ? 'World aa gayi!' : 'Failed'), !d.ok);
+    if (d.ok) pollStatus();
+  } catch (e) {
+    toast('Download fail — same WiFi? Host STOP?', true);
+  }
 }
 
 function renderSyncthing(d) {
@@ -658,10 +836,13 @@ function renderSyncthing(d) {
   const peers = Array.isArray(d.syncthing_peers) ? d.syncthing_peers : [];
   if (peersEl) {
     const syncRaw = String(d.syncthing_status || '').toLowerCase();
-    if (syncRaw === 'connected') {
-      peersEl.textContent = 'File sync: connected';
+    const deps = d.deps || {};
+    if (!deps.syncthing_running) {
+      peersEl.textContent = 'File sync: Syncthing off — neeche "Host se world download" (LAN) use karo';
+    } else if (syncRaw === 'connected') {
+      peersEl.textContent = 'File sync: connected ✓';
     } else if (!peers.length) {
-      peersEl.textContent = 'File sync: invite friend for full world sync';
+      peersEl.textContent = 'File sync: host ka invite Join mein paste karo (MCHOST:...)';
     } else {
       peersEl.textContent = 'File sync: ' + peers.filter((p) => p.connected).length + ' peer(s) online';
     }

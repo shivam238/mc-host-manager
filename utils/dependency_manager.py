@@ -25,11 +25,15 @@ SYNCTHING_HOME = APP_DATA_DIR / "syncthing"
 SYNCTHING_INSTALL_DIR = DEPS_DIR / "syncthing"
 JAVA_INSTALL_DIR = DEPS_DIR / "java"
 STATE_FILE = APP_DATA_DIR / "deps_state.json"
+SYNCTHING_LOG = APP_DATA_DIR / "syncthing.log"
 SYNCTHING_PORT = 8384
 
 _install_lock = threading.Lock()
 _state_lock = threading.Lock()
 _bg_started = False
+_bg_retries = 0
+MAX_BG_RETRIES = 12
+_install_thread_running = False
 
 
 def _load_state() -> dict[str, Any]:
@@ -153,6 +157,16 @@ def _port_open(port: int) -> bool:
         return False
 
 
+def _read_syncthing_log_tail(lines: int = 8) -> str:
+    if not SYNCTHING_LOG.exists():
+        return ""
+    try:
+        rows = SYNCTHING_LOG.read_text(encoding="utf-8", errors="replace").splitlines()
+        return "\n".join(rows[-lines:]).strip()
+    except Exception:
+        return ""
+
+
 def is_syncthing_running() -> bool:
     if not _port_open(SYNCTHING_PORT):
         return False
@@ -160,9 +174,30 @@ def is_syncthing_running() -> bool:
         import requests
 
         r = requests.get(f"http://127.0.0.1:{SYNCTHING_PORT}/rest/noauth/health", timeout=1.0)
-        return r.status_code == 200
+        if r.status_code == 200:
+            return True
     except Exception:
-        return _port_open(SYNCTHING_PORT)
+        pass
+    return _port_open(SYNCTHING_PORT)
+
+
+def syncthing_api_ready() -> bool:
+    """Port open AND we can read an API key from our or system config."""
+    if not is_syncthing_running():
+        return False
+    for p in syncthing_config_paths():
+        if not p.exists():
+            continue
+        try:
+            import xml.etree.ElementTree as ET
+
+            root = ET.parse(p).getroot()
+            el = root.find(".//apikey")
+            if el is not None and (el.text or "").strip():
+                return True
+        except Exception:
+            continue
+    return False
 
 
 def _download(url: str, dest: Path, timeout: float = 600.0) -> None:
@@ -301,15 +336,47 @@ def ensure_requests() -> tuple[bool, str]:
         return False, f"pip install requests failed: {e}"
 
 
-def start_syncthing(*, wait_seconds: float = 45.0) -> tuple[bool, str]:
-    if is_syncthing_running():
+def _ensure_syncthing_config(binary: str | Path) -> None:
+    config_xml = SYNCTHING_HOME / "config.xml"
+    if config_xml.exists():
+        return
+    SYNCTHING_HOME.mkdir(parents=True, exist_ok=True)
+    try:
+        subprocess.run(
+            [str(binary), "generate", f"--home={SYNCTHING_HOME}"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+    except Exception:
+        pass
+
+
+def start_syncthing(*, wait_seconds: float = 60.0) -> tuple[bool, str]:
+    if syncthing_api_ready():
         return True, "Syncthing already running"
 
     binary = resolve_syncthing_binary()
     if not binary:
-        return False, "Syncthing binary not found"
+        return False, "Syncthing binary not found — internet se download karo ya install karo."
+
+    _ensure_syncthing_config(binary)
+
+    if _port_open(SYNCTHING_PORT) and not (SYNCTHING_HOME / "config.xml").exists():
+        msg = (
+            "Port 8384 pe koi aur Syncthing chal raha hai. "
+            "Us app ko band karo ya system Syncthing restart karo."
+        )
+        _save_state({"last_error": msg})
+        return False, msg
 
     SYNCTHING_HOME.mkdir(parents=True, exist_ok=True)
+    APP_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    log_fh = open(SYNCTHING_LOG, "a", encoding="utf-8", errors="replace")
+    log_fh.write(f"\n--- start {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n")
+    log_fh.flush()
+
     cmd = [
         str(binary),
         "serve",
@@ -317,7 +384,6 @@ def start_syncthing(*, wait_seconds: float = 45.0) -> tuple[bool, str]:
         f"--gui-address=127.0.0.1:{SYNCTHING_PORT}",
         "--no-browser",
         "--no-restart",
-        "--logflags=0",
     ]
     creationflags = 0
     if os.name == "nt" and hasattr(subprocess, "CREATE_NO_WINDOW"):
@@ -327,26 +393,39 @@ def start_syncthing(*, wait_seconds: float = 45.0) -> tuple[bool, str]:
         subprocess.Popen(
             cmd,
             cwd=str(SYNCTHING_HOME),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=log_fh,
+            stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,
             creationflags=creationflags,
             start_new_session=(os.name != "nt"),
         )
     except OSError as e:
+        log_fh.close()
         return False, f"Failed to start Syncthing: {e}"
 
     deadline = time.time() + wait_seconds
     while time.time() < deadline:
-        if is_syncthing_running():
-            _save_state({"syncthing_running": True})
+        if syncthing_api_ready():
+            _save_state({"syncthing_running": True, "last_error": ""})
+            try:
+                from utils.flow_manager import st_api
+
+                st_api.refresh_api_key()
+            except Exception:
+                pass
             return True, "Syncthing started"
-        time.sleep(0.4)
-    return False, "Syncthing start timed out (check port 8384)"
+        time.sleep(0.5)
+
+    tail = _read_syncthing_log_tail(6)
+    err = "Syncthing start timeout. Internet / port 8384 check karo."
+    if tail:
+        err += f" Log: {tail[-200:]}"
+    _save_state({"last_error": err})
+    return False, err
 
 
 def ensure_syncthing(*, install_if_missing: bool = True) -> tuple[bool, str]:
-    if is_syncthing_running():
+    if syncthing_api_ready():
         return True, "Syncthing running"
 
     if not resolve_syncthing_binary():
@@ -374,11 +453,14 @@ def ensure_java(*, install_if_missing: bool = True) -> tuple[bool, str]:
 
 def status_snapshot() -> dict[str, Any]:
     st = _load_state()
+    running = syncthing_api_ready()
     return {
         "syncthing_installed": bool(resolve_syncthing_binary()),
-        "syncthing_running": is_syncthing_running(),
+        "syncthing_running": running,
+        "syncthing_port_open": _port_open(SYNCTHING_PORT),
         "syncthing_bundled": bool(bundled_syncthing_binary()),
         "syncthing_version": st.get("syncthing_version") or (SYNCTHING_VERSION if bundled_syncthing_binary() else ""),
+        "syncthing_log_tail": _read_syncthing_log_tail(4),
         "java_installed": is_java_usable(),
         "java_bundled": bool(bundled_java_binary()),
         "java_path": resolve_java_binary() or "",
@@ -400,9 +482,9 @@ def _has_requests() -> bool:
 
 def ensure_all_dependencies(
     *,
-    install_syncthing: bool = True,
-    install_java: bool = True,
-    install_requests: bool = True,
+    want_syncthing: bool = True,
+    want_java: bool = True,
+    want_requests: bool = True,
     start_sync: bool = True,
 ) -> dict[str, Any]:
     """Install and start missing dependencies. Safe to call multiple times."""
@@ -418,15 +500,20 @@ def ensure_all_dependencies(
                 results["ok"] = False
                 _save_state({"last_error": msg, "last_message": msg})
 
-        if install_requests:
+        if want_requests:
             step("requests", ensure_requests)
 
-        if install_syncthing:
-            step("syncthing_install", lambda: install_syncthing() if not resolve_syncthing_binary() else (True, "Syncthing present"))
+        if want_syncthing:
+            if not resolve_syncthing_binary():
+                step("syncthing_pkg", try_system_package_syncthing)
+            step(
+                "syncthing_install",
+                lambda: install_syncthing() if not resolve_syncthing_binary() else (True, "Syncthing present"),
+            )
             if start_sync:
                 step("syncthing_start", lambda: ensure_syncthing(install_if_missing=False))
 
-        if install_java:
+        if want_java:
             step("java", lambda: ensure_java(install_if_missing=True))
 
         try:
@@ -435,6 +522,12 @@ def ensure_all_dependencies(
             st_api.refresh_api_key()
         except Exception:
             pass
+
+        snap = status_snapshot()
+        if want_syncthing and not snap.get("syncthing_running"):
+            results["ok"] = False
+            if not _load_state().get("last_error"):
+                _save_state({"last_error": "Syncthing start nahi hua — Install now dabao ya internet check karo."})
 
         summary = "; ".join(s["msg"] for s in results["steps"] if s.get("msg"))
         _save_state(
@@ -448,16 +541,68 @@ def ensure_all_dependencies(
         return results
 
 
-def ensure_dependencies_background() -> None:
-    global _bg_started
-    if _bg_started:
-        return
-    _bg_started = True
+def start_install_async() -> dict[str, Any]:
+    """Non-blocking install for HTTP — poll /deps/status."""
+    global _install_thread_running
 
-    def _run() -> None:
+    def _worker() -> None:
+        global _install_thread_running
         try:
             ensure_all_dependencies()
         except Exception as e:
             _save_state({"installing": False, "last_error": str(e)})
+        finally:
+            _install_thread_running = False
 
+    with _install_lock:
+        if _install_thread_running:
+            return {"ok": True, "msg": "Install already running.", "status": status_snapshot()}
+        _install_thread_running = True
+        _save_state({"installing": True, "last_message": "Installing..."})
+    threading.Thread(target=_worker, daemon=True, name="deps-install").start()
+    return {"ok": True, "msg": "Install started — wait 1-2 min.", "status": status_snapshot()}
+
+
+def try_system_package_syncthing() -> tuple[bool, str]:
+    """Best-effort: apt/dnf install when available (may need user sudo)."""
+    if system_syncthing_binary():
+        return True, "Syncthing on PATH"
+    if os.name == "nt":
+        return False, "Use installer or bundled download on Windows"
+    for cmd in (
+        ["apt-get", "install", "-y", "syncthing"],
+        ["dnf", "install", "-y", "syncthing"],
+        ["pacman", "-S", "--noconfirm", "syncthing"],
+    ):
+        if not shutil.which(cmd[0]):
+            continue
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=120, check=False)
+            if r.returncode == 0 and system_syncthing_binary():
+                return True, f"Installed via {cmd[0]}"
+        except Exception:
+            continue
+    return False, "Package install skipped (needs sudo or not found)"
+
+
+def ensure_dependencies_background() -> None:
+    global _bg_started
+
+    def _run() -> None:
+        global _bg_retries
+        while _bg_retries < MAX_BG_RETRIES:
+            _bg_retries += 1
+            try:
+                result = ensure_all_dependencies()
+                if result.get("ok") and result.get("status", {}).get("syncthing_running"):
+                    break
+            except Exception as e:
+                _save_state({"installing": False, "last_error": str(e)})
+            if _bg_retries < MAX_BG_RETRIES:
+                time.sleep(30)
+        _save_state({"installing": False})
+
+    if _bg_started:
+        return
+    _bg_started = True
     threading.Thread(target=_run, daemon=True, name="deps-bootstrap").start()

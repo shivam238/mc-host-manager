@@ -374,7 +374,7 @@ class SyncManager:
                     "introducer": False,
                     "paused": False,
                     "allowedNetworks": [],
-                    "autoAcceptFolders": False,
+                    "autoAcceptFolders": True,
                     "maxSendKbps": 0,
                     "maxRecvKbps": 0,
                     "untrusted": False,
@@ -396,7 +396,29 @@ class SyncManager:
                     touched = True
                 break
             if not touched:
-                return False, f'Syncthing folder "{folder_id}" not found. Save settings first.'
+                # Folder not found — try to create it first, then reload config
+                from utils.config import load_config, normalize_path, get_syncthing_folder
+                auto_cfg = load_config(force=True)
+                shared = normalize_path(auto_cfg.get("shared_dir", ""))
+                if shared and folder_id == get_syncthing_folder(auto_cfg):
+                    self.ensure_folder(folder_id, shared)
+                    # Reload config after folder creation
+                    cfg2, _ = self._load_config()
+                    if cfg2:
+                        cfg = cfg2
+                        folders = list(cfg.get("folders") or [])
+                        for folder in folders:
+                            if str(folder.get("id", "")) != folder_id:
+                                continue
+                            devs = list(folder.get("devices") or [])
+                            ids = {str(x.get("deviceID", "")) for x in devs}
+                            if did not in ids:
+                                devs.append({"deviceID": did})
+                                folder["devices"] = devs
+                                touched = True
+                            break
+                if not touched:
+                    return False, f'Syncthing folder "{folder_id}" not found. Save settings first.'
             cfg["folders"] = folders
 
         ok, save_msg = self._save_config(cfg)

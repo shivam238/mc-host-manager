@@ -33,7 +33,7 @@ def build_next_steps(cfg: dict[str, Any], syn_h: dict[str, Any]) -> list[str]:
     if sid:
         steps.append(f"Share Server ID with friends: {sid}")
     if not syn_h.get("running"):
-        steps.append("Syncthing auto-install ho raha hai — thodi der wait karo, phir refresh karo.")
+        steps.append("Syncthing chahiye — yellow banner mein 'Ab install karo' dabao (internet on).")
     elif not syn_h.get("folder_exists"):
         steps.append("Save once more if Syncthing folder was not created.")
     elif int(syn_h.get("connected_peers", 0) or 0) <= 0:

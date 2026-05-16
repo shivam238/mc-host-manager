@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
-  <div id="wizard" class="wizard">
+  <div id="wizard" class="wizard hidden">
     <div class="wizard-card">
       <h2 class="wizard-title">Quick Setup</h2>
       <p class="wizard-lead">Naam likho, phir ya to naya server banao ya friend ka Server ID se join karo.</p>
@@ -106,6 +106,9 @@
             <button type="button" onclick="openJoinPanel()">🤝 Join friend</button>
           </div>
 
+          <button type="button" class="btn-switch-host" onclick="switchHostHere()">⚡ Yahan host karo</button>
+          <p id="switch-host-hint" class="small switch-hint hidden"></p>
+
           <div id="panel-invite" class="friend-panel hidden">
             <p class="small">Friend ko Server ID ya poora invite bhejo (WhatsApp).</p>
             <div class="invite-code-box">
@@ -120,9 +123,19 @@
           </div>
 
           <div id="panel-join" class="friend-panel hidden">
+            <p class="small warn-txt">Host ka Server ID likho — tumhara purana ID replace ho jayega. Example: host par <b>F00DF00D</b> dikhe to wahi paste karo.</p>
             <label class="lbl">Friend ka Server ID / invite</label>
-            <input id="join-input" class="inp" placeholder="Server ID e.g. A1B2C3D4" />
+            <input id="join-input" class="inp" placeholder="e.g. F00DF00D or MCHOST:F00DF00D:DEVICE..." />
             <button type="button" class="btn-wizard" style="margin-top:8px;" onclick="joinFriend()">Join this group</button>
+          </div>
+
+          <div class="friend-panel lan-sync-box">
+            <p class="small"><b>Syncthing ke bina</b> (same WiFi):</p>
+            <label class="lbl">Host PC ka IP</label>
+            <input id="lan-host-ip" class="inp" placeholder="e.g. 192.168.0.10" />
+            <p class="small">Host server STOP hona chahiye. Pehle same Server ID se join karo.</p>
+            <button type="button" class="btn-wizard" style="margin-top:8px;" onclick="pullWorldLan()">📥 Host se world download</button>
+            <button type="button" class="btn-ghost" style="margin-top:6px;width:100%;" onclick="pullWorldAuto()">🔄 Auto sync world</button>
           </div>
 
           <div id="members-summary" class="small" style="margin-top:12px;">—</div>
@@ -139,6 +152,7 @@
               <button type="button" onclick="detectServer()">Detect</button>
             </div>
           </div>
+          <div class="row"><label>Firebase URL (Auto Sync)</label><input id="f-firebase" placeholder="https://..." /></div>
           <input type="hidden" id="f-server-id" />
           <input type="hidden" id="f-shared" />
           <input type="hidden" id="f-project" value="Minecraft Server" />
@@ -151,6 +165,12 @@
             <div><label>Max players</label><input id="f-max" type="number" value="20" /></div>
           </div>
           <div class="row"><label>JAR</label><input id="f-jar" value="server.jar" /></div>
+          <div class="row check-row">
+            <label><input type="checkbox" id="f-strict-sync" /> Strict sync (Syncthing peers ke bina START block)</label>
+          </div>
+          <div class="row check-row">
+            <label><input type="checkbox" id="f-auto-world" checked /> START se pehle auto world sync (LAN)</label>
+          </div>
           <div class="actions" style="grid-template-columns:1fr 1fr;margin-top:8px;">
             <button onclick="saveSettings()">Save</button>
             <button class="btn-danger" onclick="forceClear()">Clear lock</button>

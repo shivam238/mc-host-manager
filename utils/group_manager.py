@@ -22,6 +22,7 @@ from utils.server_layout import (
     write_server_id_file,
 )
 from utils import members_registry
+from utils import matchmaker
 
 
 def format_invite_code(server_id: str, device_id: str = "", folder_id: str = "") -> str:
@@ -79,7 +80,16 @@ def create_server_group(
             cfg["server_dir"] = hits[0]["path"]
             cfg["server_jar"] = hits[0].get("jar", cfg.get("server_jar", "server.jar"))
 
-    return _finalize_group(cfg, role="host", st_api=st_api)
+    res = _finalize_group(cfg, role="host", st_api=st_api)
+    
+    fb_url = cfg.get("firebase_url", "")
+    if fb_url and res.get("ok") and st_api:
+        payload = st_api.build_invite_payload(cfg["server_id"], res.get("syncthing_folder", ""))
+        ok, msg = matchmaker.upload_host_invite(fb_url, cfg["server_id"], payload)
+        if not ok:
+            res["msg"] += f" (Matchmaker warning: {msg})"
+            
+    return res
 
 
 def join_server_group(
@@ -98,6 +108,7 @@ def join_server_group(
     if not sid:
         return {"ok": False, "msg": "Enter a valid Server ID or paste friend's invite code."}
 
+    # ── Step 1: Prepare config ──────────────────────────────────
     cfg = load_config(force=True)
     cfg["server_id"] = sid
     cfg["_overwrite_server_id"] = True
@@ -110,17 +121,53 @@ def join_server_group(
             cfg["server_dir"] = hits[0]["path"]
             cfg["server_jar"] = hits[0].get("jar", cfg.get("server_jar", "server.jar"))
 
+    # ── Step 2: Finalize group (saves config, creates shared_dir) ──
     result = _finalize_group(cfg, role="join", st_api=st_api)
-
-    if not result.get("ok") or st_api is None:
+    if not result.get("ok"):
         return result
 
+    # ── Step 3: Ensure shared_dir and Syncthing folder exist ────
+    saved_cfg = load_config(force=True)
+    shared = normalize_path(saved_cfg.get("shared_dir", ""))
+    syn_folder = result.get("syncthing_folder") or get_syncthing_folder(saved_cfg)
+    _debug = []
+
+    # Force-create shared_dir if still missing
+    if not shared:
+        from pathlib import Path as _P
+        shared = str(_P.home() / "mc-host-shared")
+        saved_cfg["shared_dir"] = shared
+        save_config(saved_cfg)
+        saved_cfg = load_config(force=True)
+        _debug.append(f"created shared: {shared}")
+    else:
+        _debug.append(f"shared exists: {shared}")
+
+    # Create directory on disk
+    from pathlib import Path as _P2
+    _P2(shared).mkdir(parents=True, exist_ok=True)
+    _debug.append(f"dir on disk: {_P2(shared).is_dir()}")
+
+    # Force-create Syncthing folder
+    if st_api is not None:
+        ef_ok, ef_msg = st_api.ensure_folder(syn_folder, shared)
+        _debug.append(f"ensure_folder({syn_folder}): ok={ef_ok}, msg={ef_msg}")
+        # Double-check with health
+        h = st_api.get_health(syn_folder)
+        _debug.append(f"health: folder_exists={h.get('folder_exists')}, api_key={h.get('api_key_ok')}, running={h.get('running')}")
+    
+    result["_debug"] = _debug
+    print(f"[JOIN DEBUG] {_debug}")
+
+    if st_api is None:
+        return result
+
+    # ── Step 4: Connect to host (via invite payload or Firebase) ──
     device_id = str(payload.get("device_id", "") or "").strip()
-    folder = str(payload.get("folder_id", "") or "").strip()
-    if not folder:
-        folder = result.get("syncthing_folder") or get_syncthing_folder(load_config(force=True))
+    folder = str(payload.get("folder_id", "") or "").strip() or syn_folder
 
     if device_id:
+        # Direct invite (copy-paste or QR)
         ok_add, add_msg = st_api.apply_invite_payload(
             {
                 "t": "mc-host",
@@ -130,16 +177,36 @@ def join_server_group(
                 "device_name": str(payload.get("device_name", "") or "Friend"),
             }
         )
-        result["syncthing_peer_msg"] = add_msg
         if ok_add:
             result["msg"] = f"Joined group {sid}. File sync peer added."
         else:
             result["msg"] = f"Joined group {sid}. Syncthing: {add_msg}"
     else:
-        result["msg"] = (
-            f"Joined server group {sid}. "
-            "World files sync when friend sends full invite (Copy invite) or QR."
-        )
+        # Firebase auto-connect
+        fb_url = saved_cfg.get("firebase_url", "")
+        if fb_url:
+            ok_f, msg_f, data = matchmaker.fetch_host_invite(fb_url, sid)
+            if ok_f and data:
+                ok_add, add_msg = st_api.apply_invite_payload(data)
+                if ok_add:
+                    result["msg"] = f"Joined group {sid}. Auto-connected to Host via Firebase."
+                    # Push our invite back so host can auto-accept us
+                    my_payload = st_api.build_invite_payload(sid, syn_folder)
+                    my_did = my_payload.get("device_id", "")
+                    if my_did:
+                        matchmaker.upload_peer_invite(fb_url, sid, my_did, my_payload)
+                else:
+                    result["msg"] = f"Joined group {sid}. Firebase ok, but sync: {add_msg}"
+            else:
+                result["msg"] = (
+                    f"Joined server group {sid}. "
+                    f"Auto-connect failed ({msg_f}). World files sync when friend sends full invite."
+                )
+        else:
+            result["msg"] = (
+                f"Joined server group {sid}. "
+                "World files sync when friend sends full invite (Copy invite) or QR."
+            )
 
     return result
 

@@ -33,9 +33,13 @@ from utils.flow_manager import (
     update_server_properties
 )
 from utils.host_policy import evaluate_start_gate
+from utils.remote_lock import local_lock_snapshot, poll_remote_hosting
+from utils.world_conflict import check_world_conflict
+from utils.host_automation import auto_pull_world, pick_best_host_ip, switch_host_flow, prepare_then_start
 from utils.setup_flow import is_setup_complete, run_quick_setup, build_next_steps
 from utils.group_manager import create_server_group, join_server_group, format_invite_code, parse_invite_input
 from utils import dependency_manager
+from utils import world_transfer
 
 def read_json(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
     length = int(handler.headers.get("Content-Length", 0) or 0)
@@ -151,13 +155,27 @@ def get_status(cfg: dict[str, Any]) -> dict[str, Any]:
     players = cache_get("players_online", 1.0 if running else 2.5, mc_server.get_online_players)
     pinfo = cache_get("players_info", 1.4 if running else 3.0, mc_server.get_player_stats)
 
+    remote_lock = None
+    if cfg.get("http_lock_enabled", True) and server_id and not running:
+        remote_lock = cache_get(
+            f"remote_lock:{server_id}:{shared}",
+            2.0,
+            lambda: poll_remote_hosting(cfg),
+        )
+
     gate = evaluate_start_gate(
         cfg,
         running=running,
         task_running=bool(task.get("running")),
         lock_info=lock_info,
         syn_h=syn_h,
+        remote_lock=remote_lock,
     )
+
+    world_c = check_world_conflict(cfg) if not running else {"has_conflict": False, "message": ""}
+    suggested_ip = ""
+    if not running and cfg.get("auto_world_before_start", True):
+        suggested_ip, _ = pick_best_host_ip(cfg)
 
     file_sid = read_server_id_file(shared) if shared else ""
     members = cache_get(
@@ -221,6 +239,14 @@ def get_status(cfg: dict[str, Any]) -> dict[str, Any]:
         "start_block_reason": str(gate.get("start_block_reason") or ""),
         "sync_isolated": bool(gate.get("sync_isolated")),
         "remote_host": str(gate.get("remote_host") or ""),
+        "remote_lock_peer": str((remote_lock or {}).get("peer_ip", "") or ""),
+        "strict_sync_gate": bool(cfg.get("strict_sync_gate", False)),
+        "auto_world_before_start": bool(cfg.get("auto_world_before_start", True)),
+        "http_lock_enabled": bool(cfg.get("http_lock_enabled", True)),
+        "firebase_url": str(cfg.get("firebase_url", "")),
+        "world_conflict": bool(world_c.get("has_conflict")),
+        "world_conflict_msg": str(world_c.get("message") or ""),
+        "suggested_host_ip": suggested_ip,
         "invite_code": format_invite_code(server_id),
         "deps": cache_get("deps_status", 2.5, dependency_manager.status_snapshot),
     }
@@ -316,9 +342,22 @@ class APIHandler(BaseHTTPRequestHandler):
             self._json({"ok": True, **dependency_manager.status_snapshot()})
             return
 
+        if self.path.startswith("/host/lock"):
+            q = parse_qs(urlparse(self.path).query)
+            want_sid = normalize_server_id(str((q.get("server_id") or [""])[0]))
+            cfg_sid = normalize_server_id(str(cfg.get("server_id", "") or ""))
+            if want_sid and cfg_sid and want_sid != cfg_sid:
+                self._json({"ok": False, "msg": "Server ID mismatch"}, code=403)
+                return
+            snap = local_lock_snapshot(cfg, running=mc_server.is_running())
+            self._json(snap)
+            return
+
         if self.path == "/syncthing/invite":
             sid = str(cfg.get("server_id", "") or "").strip()
+            # pyrefly: ignore [bad-assignment]
             folder = get_syncthing_folder(cfg)
+            # pyrefly: ignore [bad-argument-type]
             payload = st_api.build_invite_payload(sid, folder)
             invite_text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
             simple = format_invite_code(sid, str(payload.get("device_id", "") or ""))
@@ -416,6 +455,43 @@ class APIHandler(BaseHTTPRequestHandler):
                 tmp_path.unlink(missing_ok=True)
             return
 
+        if self.path.startswith("/sync/world/lan"):
+            q = parse_qs(urlparse(self.path).query)
+            want_sid = normalize_server_id(str((q.get("server_id") or [""])[0]))
+            cfg_sid = normalize_server_id(str(cfg.get("server_id", "") or ""))
+            if not want_sid or want_sid != cfg_sid:
+                self.send_response(403)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(b"Server ID mismatch")
+                return
+            ok, msg = validate_paths(cfg, True, False)
+            if not ok:
+                self.send_response(400)
+                self.end_headers()
+                self.wfile.write(msg.encode("utf-8", errors="replace"))
+                return
+            if mc_server.is_running() or is_task_running():
+                self.send_response(409)
+                self.end_headers()
+                self.wfile.write(b"Stop server on host before LAN world download.")
+                return
+            server_root = normalize_path(cfg.get("server_dir", ""))
+            ok_z, zmsg, data = world_transfer.build_world_zip(server_root)
+            if not ok_z:
+                self.send_response(404)
+                self.end_headers()
+                self.wfile.write(zmsg.encode("utf-8", errors="replace"))
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "application/zip")
+            self.send_header("Content-Disposition", 'attachment; filename="mc-world-lan.zip"')
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(data)
+            return
+
         if self.path.startswith("/open-folder"):
             q = parse_qs(urlparse(self.path).query)
             target = str((q.get("target") or [""])[0]).strip().lower()
@@ -461,13 +537,103 @@ class APIHandler(BaseHTTPRequestHandler):
             return
 
         if self.path == "/deps/install":
-            result = dependency_manager.ensure_all_dependencies()
-            try:
-                st_api.refresh_api_key()
-            except Exception:
-                pass
+            result = dependency_manager.start_install_async()
             clear_cache()
-            self._json(result, code=200 if result.get("ok") else 500)
+            self._json(result)
+            return
+
+        if self.path == "/sync/world/lan/pull":
+            if mc_server.is_running() or is_task_running():
+                self._json({"ok": False, "msg": "Pehle apna server STOP karo, phir world download karo."})
+                return
+            host_ip = str(body.get("host_ip") or body.get("host") or "").strip()
+            sid = normalize_server_id(str(body.get("server_id") or cfg.get("server_id", "") or ""))
+            server_dir = normalize_path(cfg.get("server_dir", ""))
+            if not server_dir:
+                self._json({"ok": False, "msg": "Server folder set karo (Setup / Advanced)."})
+                return
+            ok, msg = world_transfer.pull_world_from_host(host_ip, sid, server_dir)
+            clear_cache()
+            self._json({"ok": ok, "msg": msg})
+            return
+
+        if self.path == "/sync/world/auto":
+            if mc_server.is_running() or is_task_running():
+                self._json({"ok": False, "msg": "Pehle apna server STOP karo."})
+                return
+            cfg_now = load_config(force=True)
+
+            def _auto_task(cb):
+                ok, msg = auto_pull_world(
+                    cfg_now,
+                    cb,
+                    host_ip=str(body.get("host_ip") or body.get("host") or ""),
+                    wait_host_stop=bool(body.get("wait_host_stop", True)),
+                )
+                if not ok:
+                    raise RuntimeError(msg)
+                cb(100, msg)
+
+            ok = run_task("world-sync", _auto_task)
+            clear_cache()
+            self._json({"ok": ok, "msg": "Auto world sync started..." if ok else "Busy."})
+            return
+
+        if self.path == "/host/switch":
+            if not can_control_request(self, cfg, body):
+                self._json({"ok": False, "msg": "Control blocked (project key mismatch)."})
+                return
+            if is_task_running():
+                self._json({"ok": False, "msg": "Another operation is running."})
+                return
+            if mc_server.is_running():
+                self._json({"ok": False, "msg": "Pehle apna server STOP karo."})
+                return
+            cfg_now = load_config(force=True)
+            conflict = check_world_conflict(cfg_now)
+            if conflict.get("has_conflict") and not body.get("ack_world_overwrite"):
+                self._json(
+                    {
+                        "ok": False,
+                        "msg": str(conflict.get("message") or "World conflict."),
+                        "world_conflict": True,
+                    }
+                )
+                return
+            auto_start = bool(body.get("auto_start", True))
+
+            def _switch_task(cb):
+                fb_url = cfg_now.get("firebase_url", "")
+                sid = str(cfg_now.get("server_id", "")).strip()
+                if fb_url and sid:
+                    try:
+                        from utils import matchmaker
+                        syn_folder = get_syncthing_folder(cfg_now)
+                        inv = st_api.build_invite_payload(sid, syn_folder)
+                        matchmaker.upload_host_invite(fb_url, sid, inv)
+                    except Exception:
+                        pass
+
+                if auto_start:
+                    switch_host_flow(
+                        cfg_now,
+                        cb,
+                        start_fn=start_flow,
+                        host_ip=str(body.get("host_ip") or ""),
+                        auto_start=True,
+                        ack_world_overwrite=bool(body.get("ack_world_overwrite")),
+                    )
+                else:
+                    switch_host_flow(
+                        cfg_now,
+                        cb,
+                        start_fn=start_flow,
+                        host_ip=str(body.get("host_ip") or ""),
+                        auto_start=False,
+                    )
+
+            ok = run_task("switch-host", _switch_task)
+            self._json({"ok": ok, "msg": "Switch host started..." if ok else "Busy."})
             return
 
         if self.path == "/config/save":
@@ -581,6 +747,11 @@ class APIHandler(BaseHTTPRequestHandler):
                 if shared:
                     syn_folder = result.get("syncthing_folder") or get_syncthing_folder(load_config(force=True))
                     st_api.ensure_folder(syn_folder, shared)
+                try:
+                    dependency_manager.ensure_syncthing(install_if_missing=True)
+                    st_api.refresh_api_key()
+                except Exception:
+                    pass
             clear_cache()
             self._json(result, code=200 if result.get("ok") else 400)
             return
@@ -599,20 +770,43 @@ class APIHandler(BaseHTTPRequestHandler):
             shared = normalize_path(cfg_now.get("shared_dir", ""))
             lock_info = lock_manager.get_lock(shared) if shared else None
             syn_h = st_api.get_health(get_syncthing_folder(cfg_now))
+            remote_lock = poll_remote_hosting(cfg_now) if cfg_now.get("http_lock_enabled", True) else None
             gate = evaluate_start_gate(
                 cfg_now,
                 running=False,
                 task_running=False,
                 lock_info=lock_info,
                 syn_h=syn_h,
+                remote_lock=remote_lock,
             )
+            conflict = check_world_conflict(cfg_now)
+            if conflict.get("has_conflict") and not body.get("ack_world_overwrite"):
+                self._json(
+                    {
+                        "ok": False,
+                        "msg": str(conflict.get("message") or "World conflict."),
+                        "world_conflict": True,
+                    }
+                )
+                return
             if not gate.get("can_start"):
                 remote = str(gate.get("remote_host") or "")
                 allow_override = bool(body.get("ack_isolated_risk")) and not remote
                 if not allow_override:
                     self._json({"ok": False, "msg": str(gate.get("start_block_reason") or "Cannot start server.")})
                     return
-            ok = run_task("starting", lambda cb: start_flow(load_config(force=True), cb))
+
+            def _start_task(cb):
+                prepare_then_start(
+                    load_config(force=True),
+                    cb,
+                    start_fn=start_flow,
+                    auto_pull=body.get("auto_pull"),
+                    host_ip=str(body.get("host_ip") or ""),
+                    ack_world_overwrite=bool(body.get("ack_world_overwrite")),
+                )
+
+            ok = run_task("starting", _start_task)
             self._json({"ok": ok, "msg": "Starting..." if ok else "Another operation is running."})
             return
 

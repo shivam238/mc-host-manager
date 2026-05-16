@@ -371,6 +371,39 @@ input:focus, select:focus { border-color: #3da2ff; }
   background: #2a2208;
   color: #ffe8a8;
 }
+.deps-banner .btn-linkish {
+  margin-left: 6px;
+  color: #ffd56a;
+  text-decoration: underline;
+  cursor: pointer;
+  background: none;
+  border: none;
+  font: inherit;
+}
+.warn-txt { color: #ffb86a; margin: 0 0 8px; line-height: 1.35; }
+.lan-sync-box {
+  margin-top: 12px;
+  border-color: #2a6a4a;
+  background: rgba(8, 32, 24, 0.55);
+}
+.btn-switch-host {
+  width: 100%;
+  margin-top: 10px;
+  padding: 12px 14px;
+  font-size: 1rem;
+  font-weight: 600;
+  border: 1px solid #3d9a6a;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #1f6b4a 0%, #145238 100%);
+  color: #e8fff4;
+  cursor: pointer;
+}
+.btn-switch-host:hover { filter: brightness(1.08); }
+.btn-switch-host:disabled { opacity: 0.45; cursor: not-allowed; }
+.switch-hint { color: #9fd4b8; margin: 6px 0 0; line-height: 1.35; }
+.switch-hint.show { display: block !important; }
+.check-row label { font-size: 0.86rem; color: var(--muted); cursor: pointer; }
+.check-row input { margin-right: 8px; }
 .btn-ghost {
   background: transparent;
   border: 1px solid var(--line);

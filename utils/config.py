@@ -44,6 +44,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "backup_keep": 5,
     "project_key": "",
     "allow_remote_stop": True,
+    "strict_sync_gate": False,
+    "auto_world_before_start": True,
+    "http_lock_enabled": True,
+    "firebase_url": "",
 }
 
 config_lock = threading.Lock()
@@ -79,6 +83,9 @@ def _normalize_cfg(raw: dict[str, Any] | None) -> dict[str, Any]:
     cfg["max_players"] = max(1, min(500, cfg["max_players"]))
     cfg["whitelist_enabled"] = bool(cfg.get("whitelist_enabled", False))
     cfg["allow_remote_stop"] = bool(cfg.get("allow_remote_stop", True))
+    cfg["strict_sync_gate"] = bool(cfg.get("strict_sync_gate", False))
+    cfg["auto_world_before_start"] = bool(cfg.get("auto_world_before_start", True))
+    cfg["http_lock_enabled"] = bool(cfg.get("http_lock_enabled", True))
     try:
         keep = int(cfg.get("backup_keep", 5))
     except Exception:
@@ -89,6 +96,7 @@ def _normalize_cfg(raw: dict[str, Any] | None) -> dict[str, Any]:
     cfg["project_name"] = str(cfg.get("project_name", "Minecraft Server") or "Minecraft Server").strip()
     cfg["project_key"] = str(cfg.get("project_key", "") or "").strip()
     cfg["server_id"] = str(cfg.get("server_id", "") or "").strip().upper()
+    cfg["firebase_url"] = str(cfg.get("firebase_url", "") or "").strip()
     return cfg
 
 def load_config(force: bool = False) -> dict[str, Any]:
