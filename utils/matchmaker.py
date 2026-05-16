@@ -172,3 +172,53 @@ def release_lock(firebase_url: str, server_id: str, node_id: str) -> None:
                 requests.delete(endpoint, timeout=2.0)
     except Exception:
         pass
+
+def get_lock_data(fb_url, server_id):
+    """Retrieve the current lock data from Firebase."""
+    if not fb_url or not server_id: return False, "Missing URL/SID", None
+    try:
+        url = f"{_get_base_url(fb_url)}/locks/{server_id.upper()}.json"
+        # Disable cache
+        url += f"?cache_bust={int(time.time())}"
+        r = requests.get(url, timeout=5).json()
+        if r and isinstance(r, dict):
+            return True, "OK", r
+        return True, "No lock", None
+    except Exception as e:
+        return False, str(e), None
+
+def send_signal(fb_url, server_id, cmd, target_node=None, sender_node=None):
+    """Send a command signal to a specific node or the whole group."""
+    if not fb_url or not server_id: return False
+    try:
+        url = f"{_get_base_url(fb_url)}/servers/{server_id.upper()}/signal.json"
+        payload = {"cmd": cmd, "t": int(time.time())}
+        if target_node: payload["target"] = target_node
+        if sender_node: payload["sender"] = sender_node
+        requests.put(url, json=payload, timeout=5)
+        return True
+    except Exception:
+        return False
+
+def check_signal(fb_url, server_id):
+    """Check if there is a pending signal for us."""
+    if not fb_url or not server_id: return None
+    try:
+        url = f"{_get_base_url(fb_url)}/servers/{server_id.upper()}/signal.json"
+        # Disable cache with timestamp
+        url += f"?cache_bust={int(time.time())}"
+        r = requests.get(url, timeout=3).json()
+        if r and isinstance(r, dict):
+            return r
+    except Exception:
+        pass
+    return None
+
+def clear_signal(fb_url, server_id):
+    """Clear the signal after processing."""
+    if not fb_url or not server_id: return
+    try:
+        url = f"{_get_base_url(fb_url)}/servers/{server_id.upper()}/signal.json"
+        requests.delete(url, timeout=3)
+    except Exception:
+        pass

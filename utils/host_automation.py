@@ -1,158 +1,120 @@
-from __future__ import annotations
-
 import time
+import os
+import subprocess
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Optional, Dict
 
-from utils.config import get_local_ip, get_node_id, load_user, normalize_path
-from utils import members_registry, world_transfer
-from utils.remote_lock import (
-    candidate_peer_ips,
-    fetch_peer_lock,
-    poll_remote_hosting,
-    wait_peer_stopped,
+from utils import backup_manager, lock_manager, server_controller, sync_manager, matchmaker, members_registry
+from utils.config import (
+    load_config,
+    save_config,
+    load_user,
+    get_node_id,
+    ensure_project_key,
+    ensure_shared_layout,
+    normalize_path,
+    get_syncthing_folder
 )
-from utils.server_layout import normalize_server_id
+from utils.app_state import task_status, clear_cache
+from utils.host_policy import evaluate_start_gate
+from utils.remote_lock import poll_remote_hosting
 from utils.world_conflict import check_world_conflict
 
-ProgressCb = Callable[[int, str], None]
+st_api = sync_manager.SyncManager()
+mc_server = server_controller.ServerController()
 
+def pick_best_host_ip(cfg=None):
+    """Picks the best local IP for hosting."""
+    from utils.config import get_local_ip
+    return get_local_ip(), "local"
 
-def pick_best_host_ip(cfg: dict[str, Any], *, prefer_hosting: bool = True) -> tuple[str, str]:
+def auto_pull_world(cfg, cb):
+    """Automatically pulls the latest world from the shared directory."""
+    from utils.flow_manager import safe_copy_world_from_shared, ensure_shared_layout
+    shared = ensure_shared_layout(cfg.get("shared_dir", ""))
+    server = Path(cfg.get("server_dir", ""))
+    safe_copy_world_from_shared(shared, server, cb)
+
+def prepare_then_start(cfg, cb, start_fn, auto_pull=False, host_ip="", ack_world_overwrite=False):
+    """Prepares the environment and then starts the server."""
+    if auto_pull:
+        cb(5, "Auto-pulling world...")
+        auto_pull_world(cfg, cb)
+    
+    # Pass host_ip if needed or other flags
+    start_fn(cfg, cb)
+
+def wait_peer_stopped(ip: str, sid: str, timeout: int = 45):
+    """Wait until the peer has released the lock in Firebase."""
+    cfg = load_config()
+    fb_url = cfg.get("firebase_url")
+    if not fb_url: return True, ""
+    
+    end = time.time() + timeout
+    while time.time() < end:
+        is_ok, _, lock_data = matchmaker.get_lock_data(fb_url, sid)
+        if is_ok:
+            if not lock_data:
+                # Lock is gone! Wait 2 more seconds for OS/Syncthing cleanup safety
+                time.sleep(2)
+                return True, ""
+            
+            # Check if lock is old/stale
+            now = int(time.time())
+            ls = lock_data.get("t", 0)
+            if (now - ls) >= 45:
+                # Stale lock! Wait 1 more second for safety
+                time.sleep(1)
+                return True, ""
+        time.sleep(3)
+    return False, "Timed out waiting for peer to release lock in Firebase."
+
+def switch_host_flow(cfg: dict[str, Any], cb: Callable[[int, str], None], auto_start=True, start_fn=None, **kwargs) -> None:
+    """Orchestrates the host role handover."""
+    if not start_fn:
+        from utils.flow_manager import start_flow
+        start_fn = start_flow
+    
+    # Extract host_ip if passed
+    ip_from_request = kwargs.get("host_ip")
+    
+    cb(2, "Scanning network for current host...")
     shared = normalize_path(cfg.get("shared_dir", ""))
-    members = members_registry.list_members(shared) if shared else []
-    ips = candidate_peer_ips(members, local_ip=get_local_ip(), local_node=get_node_id())
-    if not ips:
-        return "", "Koi friend IP nahi mili — members list khali ya offline."
+    lock_info = lock_manager.get_lock(shared) if shared else None
+    syn_h = st_api.get_health(get_syncthing_folder(cfg))
+    
+    remote_lock = poll_remote_hosting(cfg) if cfg.get("http_lock_enabled", True) else None
+    
+    gate = evaluate_start_gate(
+        cfg,
+        running=False,
+        task_running=True,
+        lock_info=lock_info,
+        syn_h=syn_h,
+        remote_lock=remote_lock,
+    )
 
-    sid = normalize_server_id(str(cfg.get("server_id", "") or ""))
-    for ip in ips:
-        snap = fetch_peer_lock(ip, sid)
-        if snap is None:
-            continue
-        if prefer_hosting:
-            if snap.get("hosting") or snap.get("running"):
-                return ip, ""
-        else:
-            return ip, ""
-    if ips:
-        return ips[0], "Peer reachable — world download try karenge."
-    return "", "Koi reachable host IP nahi — same WiFi / firewall check karo."
-
-
-def auto_pull_world(
-    cfg: dict[str, Any],
-    cb: ProgressCb | None = None,
-    *,
-    host_ip: str = "",
-    wait_host_stop: bool = True,
-    wait_timeout: float = 180.0,
-) -> tuple[bool, str]:
-    def report(pct: int, msg: str) -> None:
-        if cb:
-            cb(pct, msg)
-
-    if cb:
-        cb(5, "Host dhoondh rahe hain...")
-
-    ip = str(host_ip or "").strip()
-    hint = ""
-    if not ip:
-        ip, hint = pick_best_host_ip(cfg)
-    if not ip:
-        return False, hint or "Host IP missing."
-
-    sid = normalize_server_id(str(cfg.get("server_id", "") or ""))
-    server_dir = normalize_path(cfg.get("server_dir", ""))
-    if not server_dir:
-        return False, "Server folder set karo."
-
-    snap = fetch_peer_lock(ip, sid)
-    if snap is None:
-        return False, f"{ip} par manager nahi mila — port 7842 / firewall check karo."
-
-    if wait_host_stop and (snap.get("running") or snap.get("hosting")):
-        report(15, f"{ip} par server band hone ka wait...")
-        ok_wait, wmsg = wait_peer_stopped(ip, sid, timeout=wait_timeout)
-        if not ok_wait:
-            return False, wmsg
-
-    report(40, f"World download from {ip}...")
-    ok, msg = world_transfer.pull_world_from_host(ip, sid, server_dir)
-    if ok:
-        report(90, msg)
-    return ok, msg
-
-
-def prepare_then_start(
-    cfg: dict[str, Any],
-    cb: ProgressCb,
-    *,
-    start_fn: Callable[[dict[str, Any], ProgressCb], None],
-    auto_pull: bool | None = None,
-    host_ip: str = "",
-    ack_world_overwrite: bool = False,
-) -> None:
-    """Sync world (Syncthing folder or LAN), then call start_fn."""
-    conflict = check_world_conflict(cfg)
-    if conflict.get("has_conflict") and not ack_world_overwrite:
-        raise RuntimeError(str(conflict.get("message") or "World conflict — confirm overwrite."))
-
-    do_pull = auto_pull if auto_pull is not None else bool(cfg.get("auto_world_before_start", True))
-    isolated = True
-    try:
-        from utils.flow_manager import st_api
-        from utils.config import get_syncthing_folder
-
-        syn_h = st_api.get_health(get_syncthing_folder(cfg))
-        if syn_h.get("running") and int(syn_h.get("connected_peers", 0) or 0) > 0:
-            isolated = False
-    except Exception:
-        pass
-
-    if do_pull and isolated:
-        cb(8, "Syncthing peers nahi — LAN se world sync...")
-        ok, msg = auto_pull_world(cfg, cb, host_ip=host_ip, wait_host_stop=True)
-        if not ok:
-            raise RuntimeError(msg)
-
-    shared = Path(normalize_path(cfg.get("shared_dir", "")))
-    latest = shared / "world_latest"
-    if latest.is_dir() and any(latest.iterdir()):
-        cb(12, "Shared world copy ready.")
-
-    start_fn(cfg, lambda p, m: cb(15 + int(p * 0.85), m))
-
-
-def switch_host_flow(
-    cfg: dict[str, Any],
-    cb: ProgressCb,
-    *,
-    start_fn: Callable[[dict[str, Any], ProgressCb], None],
-    host_ip: str = "",
-    auto_start: bool = True,
-    ack_world_overwrite: bool = False,
-) -> None:
+    remote = gate.get("remote_host")
     user = load_user()
-    cb(3, "Remote host check...")
-
-    remote = poll_remote_hosting(cfg)
-    ip = str(host_ip or "").strip()
-    if not ip and remote:
-        ip = str(remote.get("peer_ip", "") or "")
-
-    # Proactive Stop: Tell the remote host to stop before we wait
-    if ip:
-        remote_user = ""
-        if remote:
-            remote_user = str((remote.get("lock") or {}).get("host", "") or remote.get("user", "") or "")
+    
+    if remote:
+        ip = str(remote.get("ip") or "").strip()
+        remote_user = str(remote.get("user") or "")
         
         if not remote_user or remote_user.lower() != user.lower():
             try:
-                cb(7, f"Stopping remote host ({ip})...")
-                import requests
-                # Send stop command to remote manager
-                requests.post(f"http://{ip}:7842/host/stop", json={"ack_remote": True}, timeout=2.0)
+                cb(7, f"Stopping remote host ({ip or 'Global Signal'})...")
+                remote_node_id = (remote.get("node_id") if isinstance(remote, dict) else None) or "ANY"
+                matchmaker.send_signal(
+                    cfg.get("firebase_url"), 
+                    str(cfg.get("server_id")), 
+                    "stop", 
+                    target_node=remote_node_id,
+                    sender_node=get_node_id()
+                )
+                if ip:
+                    import requests
+                    requests.post(f"http://{ip}:7842/host/stop", json={"ack_remote": True}, timeout=2.0)
             except Exception:
                 pass
             
@@ -160,24 +122,10 @@ def switch_host_flow(
             ok_wait, wmsg = wait_peer_stopped(ip, str(cfg.get("server_id", "") or ""))
             if not ok_wait:
                 raise RuntimeError(wmsg)
-    elif remote:
-        # Fallback if we have remote info but no IP
-        remote_user = str((remote.get("lock") or {}).get("host", "") or remote.get("user", "") or "")
-        if remote_user and remote_user.lower() != user.lower():
-             cb(10, f"Remote host {remote_user} is active. Use manual STOP first.")
 
     if not auto_start:
-        ok, msg = auto_pull_world(cfg, cb, host_ip=ip, wait_host_stop=True)
-        if not ok:
-            raise RuntimeError(msg)
-        cb(100, msg)
+        cb(100, "Remote host stopped. You can now host manually.")
         return
 
-    prepare_then_start(
-        cfg,
-        cb,
-        start_fn=start_fn,
-        auto_pull=True,
-        host_ip=ip,
-        ack_world_overwrite=ack_world_overwrite,
-    )
+    cb(50, "Switching role to host...")
+    start_fn(cfg, cb)

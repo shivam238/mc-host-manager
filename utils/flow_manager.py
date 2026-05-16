@@ -1,5 +1,8 @@
 from __future__ import annotations
 import threading
+import time
+import os
+import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -90,6 +93,33 @@ def safe_copy_world_from_shared(shared_dir: Path, server_dir: Path, cb) -> None:
     cb(30, "Syncing world from shared...")
     backup_manager.copy_world(src, server_dir, progress_cb=lambda p, m: cb(30 + int(p * 0.2), m))
 
+def kill_port_process(port: int = 25565):
+    """Forcefully kill any process occupying the Minecraft port."""
+    try:
+        import subprocess
+        import os
+        if os.name == "nt":
+            # Windows
+            cmd = f"netstat -ano | findstr :{port}"
+            lines = subprocess.check_output(cmd, shell=True).decode().splitlines()
+            for line in lines:
+                parts = line.split()
+                if len(parts) > 4:
+                    pid = parts[-1]
+                    subprocess.run(["taskkill", "/F", "/PID", pid], capture_output=True)
+        else:
+            # Linux/Mac
+            cmd = f"lsof -t -i:{port}"
+            try:
+                pids = subprocess.check_output(cmd, shell=True).decode().splitlines()
+                for pid in pids:
+                    if pid.strip():
+                        subprocess.run(["kill", "-9", pid.strip()], capture_output=True)
+            except subprocess.CalledProcessError:
+                pass # No process found
+    except Exception:
+        pass
+
 def finalize_stop_flow(cfg: dict[str, Any], cb, reason: str = "normal") -> None:
     shared = ensure_shared_layout(cfg["shared_dir"])
     server = Path(cfg["server_dir"])
@@ -115,10 +145,11 @@ def finalize_stop_flow(cfg: dict[str, Any], cb, reason: str = "normal") -> None:
     cb(70, "Syncing world to shared...")
     backup_manager.copy_world(server, shared / "world_latest", progress_cb=lambda p, m: cb(70 + int(p * 0.2), m))
 
-    cb(92, "Releasing lock...")
+    cb(95, "Releasing locks...")
+    # 1. Release Local Lock
     lock_manager.remove_lock(shared)
     
-    # Global Lock Release (Firebase)
+    # 2. Release Global Lock (Firebase)
     fb_url = cfg.get("firebase_url", "")
     sid = cfg.get("server_id", "")
     if fb_url and sid:
@@ -143,6 +174,10 @@ def finalize_stop_flow(cfg: dict[str, Any], cb, reason: str = "normal") -> None:
     cb(100, "Stopped safely")
 
 def start_flow(cfg: dict[str, Any], cb) -> None:
+    cb(5, "Clearing port 25565...")
+    kill_port_process(25565)
+    time.sleep(1.0)
+    
     ok, msg = validate_paths(cfg, True, True)
     if not ok:
         raise RuntimeError(msg)

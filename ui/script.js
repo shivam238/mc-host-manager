@@ -244,60 +244,88 @@ function setFill(id, v) {
 
 function applyStatus(d) {
   state = d || state;
-  document.title = `${d.project_name || 'Minecraft Server'} - Host Manager`;
-  document.getElementById('title').textContent = d.project_name || 'Minecraft Server';
+  document.title = (d.project_name || 'Minecraft Server') + ' - Host Manager';
+  var titleEl = document.getElementById('title');
+  if (titleEl) titleEl.textContent = d.project_name || 'Minecraft Server';
 
-  const badge = document.getElementById('badge');
-  if (d.task && d.task.running) {
-    badge.className = 'badge warn';
-    badge.textContent = (d.task.action || 'Working').toUpperCase();
-  } else if (d.any_running) {
-    badge.className = 'badge ok';
-    badge.textContent = 'Server Online';
-  } else {
-    badge.className = 'badge';
-    badge.textContent = 'Offline';
+  var badge = document.getElementById('badge');
+  if (badge) {
+    if (d.task && d.task.running) {
+      badge.className = 'badge warn';
+      badge.textContent = (d.task.action || 'Working').toUpperCase();
+    } else if (d.any_running) {
+      badge.className = 'badge ok';
+      badge.textContent = 'Server Online';
+    } else {
+      badge.className = 'badge';
+      badge.textContent = 'Offline';
+    }
   }
 
-  document.getElementById('s-state').textContent = d.server_state || (d.running ? 'running' : 'offline');
-  document.getElementById('s-state').className = 'v ' + ((d.running && !d.task?.running) ? 'ok' : (d.task?.running ? 'warn' : 'err'));
-  document.getElementById('s-host').textContent = d.lock?.host || d.remote_host || d.user || '-';
-  document.getElementById('s-addr').textContent = d.running ? `${d.local_ip}:25565` : (d.remote_host ? 'Remote Host' : '---');
-  document.getElementById('s-players').textContent = `${d.players_count || 0}`;
-  const sg = document.getElementById('s-group');
+  // Ensure UI is visible if setup is done (Legacy safe)
+  if (d.setup_complete && !wizardPinnedOpen) {
+    var wiz = document.getElementById('wizard');
+    if (wiz) wiz.classList.add('hidden');
+    var app = document.getElementById('app-main');
+    if (app) app.classList.remove('hidden');
+  }
+
+  var sState = document.getElementById('s-state');
+  if (sState) {
+    sState.textContent = d.server_state || (d.running ? 'running' : 'offline');
+    var isRunning = d.running && (!d.task || !d.task.running);
+    var isWorking = d.task && d.task.running;
+    sState.className = 'v ' + (isRunning ? 'ok' : (isWorking ? 'warn' : 'err'));
+  }
+  
+  var sHost = document.getElementById('s-host');
+  if (sHost) {
+    var hostName = (d.lock && d.lock.host) ? d.lock.host : (d.remote_host || d.user || '-');
+    sHost.textContent = hostName;
+  }
+  
+  var sAddr = document.getElementById('s-addr');
+  if (sAddr) sAddr.textContent = d.running ? (d.local_ip || 'localhost') + ':25565' : (d.remote_host ? 'Remote Host' : '---');
+  
+  var sPlayers = document.getElementById('s-players');
+  if (sPlayers) sPlayers.textContent = String(d.players_count || 0);
+
+  var sg = document.getElementById('s-group');
   if (sg) sg.textContent = d.server_id || '—';
 
-  const sf = document.getElementById('s-friends');
+  var sf = document.getElementById('s-friends');
   if (sf) {
-    const on = Number(d.members_online || 0);
-    const tot = Number(d.members_total || 0);
-    sf.textContent = tot ? `${on} online` : '—';
+    var on = Number(d.members_online || 0);
+    var tot = Number(d.members_total || 0);
+    sf.textContent = tot ? (on + ' online') : '—';
     sf.className = 'v ' + (on > 0 ? 'ok' : '');
   }
 
-  const hero = document.getElementById('hero-server-id');
+  var hero = document.getElementById('hero-server-id');
   if (hero) hero.textContent = d.server_id || '—';
-  const sidHidden = document.getElementById('f-server-id');
+  
+  var sidHidden = document.getElementById('f-server-id');
   if (sidHidden) sidHidden.value = d.server_id || '';
-  const inviteLine = document.getElementById('invite-code-line');
+  
+  var inviteLine = document.getElementById('invite-code-line');
   if (inviteLine) {
-    const code = d.invite_code || (d.server_id ? `MCHOST:${d.server_id}` : '');
+    var code = d.invite_code || (d.server_id ? ('MCHOST:' + d.server_id) : '');
     inviteLine.textContent = code || '—';
     if (code) inviteCache.invite_code = code;
   }
 
   updateSetupUI(d);
-  renderDeps(d.deps);
+  if (typeof renderDeps === 'function') renderDeps(d.deps);
 
-  const cpu = setFill('m-cpu', d.server_cpu_pct || 0);
-  const mem = setFill('m-mem', d.server_cpu_pct ? d.server_mem_pct : 0); // Hide metrics if not local host
-  const cpuV = document.getElementById('m-cpu-v');
-  const memV = document.getElementById('m-mem-v');
-  if (cpuV) cpuV.textContent = d.running ? `${cpu}%` : '0%';
-  if (memV) memV.textContent = d.running ? `${mem}%` : '0%';
+  var cpu = setFill('m-cpu', d.server_cpu_pct || 0);
+  var mem = setFill('m-mem', d.server_cpu_pct ? (d.server_mem_pct || 0) : 0);
+  var cpuV = document.getElementById('m-cpu-v');
+  var memV = document.getElementById('m-mem-v');
+  if (cpuV) cpuV.textContent = d.running ? (cpu + '%') : '0%';
+  if (memV) memV.textContent = d.running ? (mem + '%') : '0%';
 
-  const hint = document.getElementById('start-hint');
-  const blockReason = String(d.start_block_reason || '').trim();
+  var hint = document.getElementById('start-hint');
+  var blockReason = String(d.start_block_reason || '').trim();
   if (hint) {
     if (!d.running && blockReason) {
       hint.textContent = blockReason;
@@ -308,23 +336,26 @@ function applyStatus(d) {
     }
   }
 
-  const main = document.getElementById('btn-main');
-  if (d.task && d.task.running) {
-    main.disabled = true;
-    main.className = '';
-    main.textContent = '⏳ WORKING...';
-  } else if (d.running) {
-    main.disabled = false;
-    main.className = 'btn-danger';
-    main.textContent = '⏹ STOP';
-  } else if (d.can_start === false) {
-    main.disabled = true;
-    main.className = '';
-    main.textContent = '🔒 ' + (d.remote_host ? d.remote_host.toUpperCase() + ' IS HOSTING' : 'START LOCKED');
-  } else {
-    main.disabled = false;
-    main.className = 'btn-good';
-    main.textContent = '⚡ START SERVER';
+  var main = document.getElementById('btn-main');
+  if (main) {
+    if (d.task && d.task.running) {
+      main.disabled = true;
+      main.className = '';
+      main.textContent = '⏳ WORKING...';
+    } else if (d.running) {
+      main.disabled = false;
+      main.className = 'btn-danger';
+      main.textContent = '⏹ STOP';
+    } else if (d.can_start === false) {
+      main.disabled = true;
+      main.className = '';
+      var rh = String(d.remote_host || '').toUpperCase();
+      main.textContent = '🔒 ' + (rh ? (rh + ' IS HOSTING') : 'START LOCKED');
+    } else {
+      main.disabled = false;
+      main.className = 'btn-good';
+      main.textContent = '⚡ START SERVER';
+    }
   }
 
   renderMembers(d);

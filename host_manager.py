@@ -113,9 +113,9 @@ def monitor_members_presence() -> None:
 
 def monitor_lock_heartbeat() -> None:
     from utils import lock_manager
-    from utils.config import get_node_id, ensure_project_key
+    from utils.config import get_node_id, ensure_project_key, load_user, get_local_ip, normalize_path
     while True:
-        time.sleep(8.0)
+        time.sleep(5.0)
         with host_lock:
             active = bool(host_state["active"])
             cfg = dict(host_state.get("last_cfg") or {})
@@ -133,12 +133,43 @@ def monitor_lock_heartbeat() -> None:
             owner_node_id=get_node_id(),
         )
 
-        # Firebase Lock Heartbeat
+        # Firebase Lock Heartbeat & Remote Command Check
         fb_url = cfg.get("firebase_url", "")
         sid = cfg.get("server_id", "")
         if fb_url and sid and (mc_server.is_running() or is_task_running()):
             from utils import matchmaker
             import socket
+
+            # 1. Check for remote signals (e.g. Stop command from a peer)
+            sig = matchmaker.check_signal(fb_url, sid)
+            if sig and sig.get("cmd") == "stop":
+                my_id = get_node_id()
+                sender = sig.get("sender")
+                if sender != my_id:
+                    target = sig.get("target")
+                    if not target or target == my_id or target == "ANY":
+                        matchmaker.clear_signal(fb_url, sid)
+                        print(f"[SIGNAL] Remote STOP received from {sender}. Shutting down...")
+                        from utils.flow_manager import finalize_stop_flow
+                        threading.Thread(target=lambda: finalize_stop_flow(cfg, reason="remote_signal"), daemon=True).start()
+                        continue
+
+            # 2. Check for Lock Ownership (Conflict Prevention)
+            # If we are hosting but the lock in Firebase belongs to someone else, we must stop.
+            from utils import matchmaker
+            is_ok, _, lock_data = matchmaker.get_lock_data(fb_url, sid)
+            if is_ok and lock_data:
+                owner = lock_data.get("node_id")
+                now = int(time.time())
+                lock_time = lock_data.get("t", 0)
+                # If lock is fresh (within 45s) and NOT ours
+                if owner and owner != get_node_id() and (now - lock_time) < 45:
+                    print(f"[CONFLICT] Lock stolen by {owner}! Shutting down to prevent split-brain...")
+                    from utils.flow_manager import finalize_stop_flow
+                    threading.Thread(target=lambda: finalize_stop_flow(cfg, reason="conflict_shutdown"), daemon=True).start()
+                    continue
+
+            # 3. Renew our own lock
             ok_l, msg_l = matchmaker.acquire_lock(
                 fb_url, sid,
                 {

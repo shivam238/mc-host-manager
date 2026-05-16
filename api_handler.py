@@ -6,6 +6,7 @@ import tempfile
 import zipfile
 import subprocess
 import sys
+import time
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
@@ -15,7 +16,7 @@ from utils import backup_manager, lock_manager
 from utils.config import (
     RESOURCE_DIR, load_config, save_config, save_user, load_user,
     normalize_path, ensure_project_key, get_syncthing_folder,
-    get_local_ip,
+    get_local_ip, get_node_id,
 )
 from utils.server_layout import (
     detect_server_candidates,
@@ -326,16 +327,21 @@ class APIHandler(BaseHTTPRequestHandler):
         return
 
     def _json(self, data: Any, code: int = 200) -> None:
-        body = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
-        self.send_header("Pragma", "no-cache")
-        self.send_header("Expires", "0")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            body = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+            self.send_header("Pragma", "no-cache")
+            self.send_header("Expires", "0")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        except Exception:
+            pass
 
     def _serve_file(self, filename: str, content_type: str) -> None:
         p = RESOURCE_DIR / filename
@@ -867,8 +873,18 @@ class APIHandler(BaseHTTPRequestHandler):
                     return
 
             def _start_task(cb):
+                cfg_t = load_config(force=True)
+                fb_url = cfg_t.get("firebase_url", "")
+                sid = str(cfg_t.get("server_id", "")).strip()
+                if fb_url and sid:
+                    try:
+                        from utils import matchmaker
+                        matchmaker.clear_signal(fb_url, sid)
+                    except Exception:
+                        pass
+                        
                 prepare_then_start(
-                    load_config(force=True),
+                    cfg_t,
                     cb,
                     start_fn=start_flow,
                     auto_pull=body.get("auto_pull"),
