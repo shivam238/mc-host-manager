@@ -138,17 +138,33 @@ def switch_host_flow(
 
     remote = poll_remote_hosting(cfg)
     ip = str(host_ip or "").strip()
-    if remote and not ip:
+    if not ip and remote:
         ip = str(remote.get("peer_ip", "") or "")
+
+    # Proactive Stop: Tell the remote host to stop before we wait
+    if ip:
+        remote_user = ""
+        if remote:
+            remote_user = str((remote.get("lock") or {}).get("host", "") or remote.get("user", "") or "")
+        
+        if not remote_user or remote_user.lower() != user.lower():
+            try:
+                cb(7, f"Stopping remote host ({ip})...")
+                import requests
+                # Send stop command to remote manager
+                requests.post(f"http://{ip}:7842/host/stop", json={"ack_remote": True}, timeout=2.0)
+            except Exception:
+                pass
+            
+            cb(10, "Waiting for remote host to release world...")
+            ok_wait, wmsg = wait_peer_stopped(ip, str(cfg.get("server_id", "") or ""))
+            if not ok_wait:
+                raise RuntimeError(wmsg)
+    elif remote:
+        # Fallback if we have remote info but no IP
         remote_user = str((remote.get("lock") or {}).get("host", "") or remote.get("user", "") or "")
         if remote_user and remote_user.lower() != user.lower():
-            if remote.get("running"):
-                cb(8, f"{remote_user} hosting — STOP ka wait...")
-                ok_wait, wmsg = wait_peer_stopped(ip, str(cfg.get("server_id", "") or ""))
-                if not ok_wait:
-                    raise RuntimeError(wmsg)
-            else:
-                cb(10, f"{remote_user} ka lock clear — world sync...")
+             cb(10, f"Remote host {remote_user} is active. Use manual STOP first.")
 
     if not auto_start:
         ok, msg = auto_pull_world(cfg, cb, host_ip=ip, wait_host_stop=True)
