@@ -251,7 +251,7 @@ function applyStatus(d) {
   if (d.task && d.task.running) {
     badge.className = 'badge warn';
     badge.textContent = (d.task.action || 'Working').toUpperCase();
-  } else if (d.running) {
+  } else if (d.any_running) {
     badge.className = 'badge ok';
     badge.textContent = 'Server Online';
   } else {
@@ -261,8 +261,8 @@ function applyStatus(d) {
 
   document.getElementById('s-state').textContent = d.server_state || (d.running ? 'running' : 'offline');
   document.getElementById('s-state').className = 'v ' + ((d.running && !d.task?.running) ? 'ok' : (d.task?.running ? 'warn' : 'err'));
-  document.getElementById('s-host').textContent = d.lock?.host || d.user || '-';
-  document.getElementById('s-addr').textContent = d.running ? `${d.local_ip}:25565` : '---';
+  document.getElementById('s-host').textContent = d.lock?.host || d.remote_host || d.user || '-';
+  document.getElementById('s-addr').textContent = d.running ? `${d.local_ip}:25565` : (d.remote_host ? 'Remote Host' : '---');
   document.getElementById('s-players').textContent = `${d.players_count || 0}`;
   const sg = document.getElementById('s-group');
   if (sg) sg.textContent = d.server_id || '—';
@@ -290,11 +290,11 @@ function applyStatus(d) {
   renderDeps(d.deps);
 
   const cpu = setFill('m-cpu', d.server_cpu_pct || 0);
-  const mem = setFill('m-mem', d.server_mem_pct || 0);
+  const mem = setFill('m-mem', d.server_cpu_pct ? d.server_mem_pct : 0); // Hide metrics if not local host
   const cpuV = document.getElementById('m-cpu-v');
   const memV = document.getElementById('m-mem-v');
-  if (cpuV) cpuV.textContent = `${cpu}%`;
-  if (memV) memV.textContent = `${mem}%`;
+  if (cpuV) cpuV.textContent = d.running ? `${cpu}%` : '0%';
+  if (memV) memV.textContent = d.running ? `${mem}%` : '0%';
 
   const hint = document.getElementById('start-hint');
   const blockReason = String(d.start_block_reason || '').trim();
@@ -320,7 +320,7 @@ function applyStatus(d) {
   } else if (d.can_start === false) {
     main.disabled = true;
     main.className = '';
-    main.textContent = '🔒 START LOCKED';
+    main.textContent = '🔒 ' + (d.remote_host ? d.remote_host.toUpperCase() + ' IS HOSTING' : 'START LOCKED');
   } else {
     main.disabled = false;
     main.className = 'btn-good';

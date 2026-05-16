@@ -128,3 +128,47 @@ def fetch_presence(firebase_url: str, server_id: str) -> tuple[bool, str, list[d
         return False, f"HTTP {r.status_code}", []
     except Exception as e:
         return False, str(e), []
+# ── Global Lock (Prevents simultaneous hosting) ─────────────
+
+def acquire_lock(firebase_url: str, server_id: str, user_data: dict[str, Any]) -> tuple[bool, str]:
+    """Try to claim the host role on Firebase."""
+    if not firebase_url or not server_id or requests is None:
+        return False, "Invalid params"
+    
+    endpoint = f"{_get_base_url(firebase_url)}/locks/{server_id.upper()}.json"
+    try:
+        # 1. Check if existing lock is active
+        r = requests.get(endpoint, timeout=3.0)
+        now = int(time.time())
+        if r.status_code == 200:
+            existing = r.json()
+            if existing and isinstance(existing, dict):
+                ls = existing.get("t", 0)
+                owner = existing.get("user", "Someone")
+                # If lock is less than 45s old, it is ACTIVE
+                if (now - ls) < 45:
+                    if existing.get("node_id") != user_data.get("node_id"):
+                        return False, f"Already hosted by {owner}"
+
+        # 2. Claim it
+        data = dict(user_data)
+        data["t"] = now
+        r_put = requests.put(endpoint, json=data, timeout=3.0)
+        return (True, "Lock acquired") if r_put.status_code in (200, 204) else (False, f"HTTP {r_put.status_code}")
+    except Exception as e:
+        return False, str(e)
+
+
+def release_lock(firebase_url: str, server_id: str, node_id: str) -> None:
+    """Release the host role."""
+    if not firebase_url or not server_id or requests is None: return
+    endpoint = f"{_get_base_url(firebase_url)}/locks/{server_id.upper()}.json"
+    try:
+        # Only delete if it belongs to us
+        r = requests.get(endpoint, timeout=2.0)
+        if r.status_code == 200:
+            data = r.json()
+            if data and data.get("node_id") == node_id:
+                requests.delete(endpoint, timeout=2.0)
+    except Exception:
+        pass

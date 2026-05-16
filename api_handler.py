@@ -157,11 +157,34 @@ def get_status(cfg: dict[str, Any]) -> dict[str, Any]:
 
     remote_lock = None
     if cfg.get("http_lock_enabled", True) and server_id and not running:
+        # Check Local network peers (HTTP)
         remote_lock = cache_get(
             f"remote_lock:{server_id}:{shared}",
             2.0,
             lambda: poll_remote_hosting(cfg),
         )
+
+        # Check Global Firebase lock
+        fb_url = cfg.get("firebase_url", "")
+        if fb_url and server_id:
+            from utils import matchmaker
+            # We use a short cache for the global lock
+            ok_l, msg_l, l_data = cache_get(f"fb_lock_data:{server_id}", 2.5, lambda: (True, "", matchmaker.requests.get(f"{matchmaker._get_base_url(fb_url)}/locks/{server_id.upper()}.json").json()))
+            if l_data and isinstance(l_data, dict):
+                now = int(time.time())
+                ls = l_data.get("t", 0)
+                if (now - ls) < 45: # Lock is active
+                    if l_data.get("node_id") != get_node_id():
+                        # Override remote_lock with Firebase data for instant global block
+                        remote_lock = {
+                            "ok": True,
+                            "hosting": True,
+                            "running": True,
+                            "user": l_data.get("user", "Someone"),
+                            "peer_ip": l_data.get("ip", ""),
+                            "node_id": l_data.get("node_id", ""),
+                            "lock": {"host": l_data.get("user"), "expired": False}
+                        }
 
     gate = evaluate_start_gate(
         cfg,
@@ -207,10 +230,18 @@ def get_status(cfg: dict[str, Any]) -> dict[str, Any]:
                     # Add new member found on Firebase
                     members_list.append(fbm)
     
-    # Re-calculate counts
+    # Re-calculate counts and global status
     members_online = len([m for m in members_list if m.get("online")])
     members_total = len(members_list)
     members_list.sort(key=lambda r: (not r.get("hosting"), not r.get("online"), r.get("user", "").lower()))
+    
+    # Global running state: is ANYONE hosting?
+    any_hosting = any(m.get("hosting") for m in members_list)
+    remote_host_name = ""
+    for m in members_list:
+        if m.get("hosting") and m.get("user") != load_user():
+            remote_host_name = m.get("user", "")
+            break
 
     setup_done = is_setup_complete(cfg)
     next_steps = build_next_steps(cfg, syn_h) if setup_done else [
@@ -228,7 +259,9 @@ def get_status(cfg: dict[str, Any]) -> dict[str, Any]:
         "syncthing_folder": syn_folder,
         "project_key": project_key,
         "running": running,
-        "server_state": server_state,
+        "any_running": any_hosting or running,  # Global Status for Badge
+        "remote_host": remote_host_name,
+        "server_state": server_state if running else ("remote-running" if any_hosting else "offline"),
         "server_ready": bool(ready or mc_server.is_ready()),
         "lock": lock_info,
         "local_ip": get_local_ip(),

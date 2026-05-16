@@ -133,6 +133,26 @@ def monitor_lock_heartbeat() -> None:
             owner_node_id=get_node_id(),
         )
 
+        # Firebase Lock Heartbeat
+        fb_url = cfg.get("firebase_url", "")
+        sid = cfg.get("server_id", "")
+        if fb_url and sid and (mc_server.is_running() or is_task_running()):
+            from utils import matchmaker
+            import socket
+            ok_l, msg_l = matchmaker.acquire_lock(
+                fb_url, sid,
+                {
+                    "node_id": get_node_id(),
+                    "user": load_user(),
+                    "hostname": socket.gethostname(),
+                    "ip": get_local_ip()
+                }
+            )
+            if not ok_l:
+                # Someone else stole the lock? (should not happen if we are running)
+                # If we lose the lock, we should probably warn or stop
+                pass
+
 # ---------------------------------------------------------------------------
 # Server Main
 # ---------------------------------------------------------------------------

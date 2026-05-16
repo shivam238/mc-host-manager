@@ -117,6 +117,17 @@ def finalize_stop_flow(cfg: dict[str, Any], cb, reason: str = "normal") -> None:
 
     cb(92, "Releasing lock...")
     lock_manager.remove_lock(shared)
+    
+    # Global Lock Release (Firebase)
+    fb_url = cfg.get("firebase_url", "")
+    sid = cfg.get("server_id", "")
+    if fb_url and sid:
+        try:
+            from utils import matchmaker
+            matchmaker.release_lock(fb_url, sid, get_node_id())
+        except Exception:
+            pass
+
     try:
         st_api.scan_folder(get_syncthing_folder(cfg))
     except Exception:
@@ -190,6 +201,14 @@ def start_flow(cfg: dict[str, Any], cb) -> None:
         cb(100, "Server started")
     except Exception:
         lock_manager.remove_lock(shared)
+        fb_url = cfg.get("firebase_url", "")
+        sid = cfg.get("server_id", "")
+        if fb_url and sid:
+            try:
+                from utils import matchmaker
+                matchmaker.release_lock(fb_url, sid, get_node_id())
+            except Exception:
+                pass
         with host_lock:
             host_state["active"] = False
             host_state["ready"] = False
