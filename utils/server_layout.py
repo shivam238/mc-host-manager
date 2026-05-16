@@ -133,12 +133,20 @@ def resolve_layout(cfg: dict[str, Any], *, create_shared: bool = True) -> dict[s
     out = dict(cfg)
     server_dir = normalize_path(out.get("server_dir", ""))
 
-    if not server_dir:
+    # Fully automatic server_dir resolution
+    from pathlib import Path as _P
+    if not server_dir or not _P(server_dir).is_dir():
         hits = detect_server_candidates(limit=1)
         if hits:
             server_dir = hits[0]["path"]
             if not out.get("server_jar"):
                 out["server_jar"] = hits[0].get("jar", "server.jar")
+        else:
+            # Fallback: create a default server folder in home
+            server_dir = str(_P.home() / "mc-host-server")
+            _P(server_dir).mkdir(parents=True, exist_ok=True)
+            if not out.get("server_jar"):
+                out["server_jar"] = "server.jar"
 
     out["server_dir"] = server_dir
     shared_dir = normalize_path(out.get("shared_dir", ""))

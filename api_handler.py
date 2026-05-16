@@ -178,11 +178,39 @@ def get_status(cfg: dict[str, Any]) -> dict[str, Any]:
         suggested_ip, _ = pick_best_host_ip(cfg)
 
     file_sid = read_server_id_file(shared) if shared else ""
-    members = cache_get(
+    members_data = cache_get(
         f"members:{shared}:{lock_host}",
         1.2,
         lambda: members_registry.members_summary(shared, lock_host=lock_host),
     )
+    members_list = members_data.get("members", [])
+
+    # Merge with Firebase Presence for real-time visibility
+    fb_url = cfg.get("firebase_url", "")
+    if fb_url and server_id:
+        from utils import matchmaker
+        ok_p, _, fb_members = cache_get(f"fb_presence:{server_id}", 3.0, lambda: matchmaker.fetch_presence(fb_url, server_id))
+        if ok_p and fb_members:
+            # Create a map of existing members by user to avoid duplicates
+            seen_users = {m.get("user", "").lower(): i for i, m in enumerate(members_list)}
+            for fbm in fb_members:
+                uname = fbm.get("user", "").lower()
+                if uname in seen_users:
+                    # Update existing local record with latest info from Firebase
+                    idx = seen_users[uname]
+                    members_list[idx].update({
+                        "online": True,
+                        "hosting": fbm.get("hosting", members_list[idx].get("hosting")),
+                        "ip": fbm.get("ip", members_list[idx].get("ip")),
+                    })
+                else:
+                    # Add new member found on Firebase
+                    members_list.append(fbm)
+    
+    # Re-calculate counts
+    members_online = len([m for m in members_list if m.get("online")])
+    members_total = len(members_list)
+    members_list.sort(key=lambda r: (not r.get("hosting"), not r.get("online"), r.get("user", "").lower()))
 
     setup_done = is_setup_complete(cfg)
     next_steps = build_next_steps(cfg, syn_h) if setup_done else [
@@ -228,9 +256,9 @@ def get_status(cfg: dict[str, Any]) -> dict[str, Any]:
         "sync_pending_count": cache_get(
             f"sync_pending:{syn_folder}", 2.5, lambda: st_api.get_pending_count(syn_folder)
         ),
-        "members": members.get("members", []),
-        "members_online": int(members.get("members_online", 0)),
-        "members_total": int(members.get("members_total", 0)),
+        "members": members_list,
+        "members_online": members_online,
+        "members_total": members_total,
         "server_cpu_pct": int(m.get("cpu_pct", 0)),
         "server_mem_pct": int(m.get("mem_pct", 0)),
         "server_disk_pct": int(m.get("disk_pct", 0)),

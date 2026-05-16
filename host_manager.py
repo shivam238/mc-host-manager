@@ -86,8 +86,22 @@ def monitor_members_presence() -> None:
                 hosting=hosting,
             )
             
-            # Matchmaking: Auto-accept peers if we are the host
+            # Global Presence (Firebase)
             fb_url = cfg.get("firebase_url", "")
+            if fb_url and sid:
+                from utils.config import get_node_id, load_user, get_local_ip
+                import socket
+                matchmaker.update_presence(
+                    fb_url, sid, get_node_id(),
+                    {
+                        "user": load_user(),
+                        "hostname": socket.gethostname(),
+                        "ip": get_local_ip(),
+                        "hosting": hosting
+                    }
+                )
+
+            # Matchmaking: Auto-accept peers if we are the host
             if hosting and fb_url and sid:
                 ok, _, peers = matchmaker.fetch_peer_invites(fb_url, sid)
                 if ok and peers:

@@ -84,3 +84,47 @@ def fetch_peer_invites(firebase_url: str, server_id: str) -> tuple[bool, str, li
         return False, f"Failed (HTTP {r.status_code})", []
     except Exception as e:
         return False, f"Error: {e}", []
+
+
+# ── Presence (Real-time Global Members List) ─────────────────
+
+def update_presence(firebase_url: str, server_id: str, node_id: str, user_data: dict[str, Any]) -> tuple[bool, str]:
+    if not firebase_url or not server_id or not node_id or requests is None:
+        return False, "Invalid parameters"
+    
+    clean_node = node_id.replace(".", "_").replace("-", "_").upper()
+    endpoint = f"{_get_base_url(firebase_url)}/presence/{server_id.upper()}/{clean_node}.json"
+    try:
+        data = dict(user_data)
+        data["last_seen"] = int(time.time())
+        r = requests.put(endpoint, json=data, timeout=5.0)
+        return (True, "OK") if r.status_code in (200, 204) else (False, f"HTTP {r.status_code}")
+    except Exception as e:
+        return False, str(e)
+
+
+def fetch_presence(firebase_url: str, server_id: str) -> tuple[bool, str, list[dict[str, Any]]]:
+    if not firebase_url or not server_id or requests is None:
+        return False, "Invalid parameters", []
+        
+    endpoint = f"{_get_base_url(firebase_url)}/presence/{server_id.upper()}.json"
+    try:
+        r = requests.get(endpoint, timeout=5.0)
+        if r.status_code == 200:
+            data = r.json()
+            if data and isinstance(data, dict):
+                now = time.time()
+                members = []
+                for node_id, row in data.items():
+                    if not isinstance(row, dict): continue
+                    # Only show members active in last 120 seconds
+                    ls = row.get("last_seen", 0)
+                    if (now - ls) < 120:
+                        row["node_id"] = node_id
+                        row["online"] = True
+                        members.append(row)
+                return True, f"Found {len(members)} active members", members
+            return True, "No one online", []
+        return False, f"HTTP {r.status_code}", []
+    except Exception as e:
+        return False, str(e), []
