@@ -59,12 +59,68 @@ function updateSetupUI(d) {
   }
 }
 
+function openInvitePanel() {
+  document.getElementById('panel-invite')?.classList.remove('hidden');
+  document.getElementById('panel-join')?.classList.add('hidden');
+  loadInvite();
+}
+
+function openJoinPanel() {
+  document.getElementById('panel-join')?.classList.remove('hidden');
+  document.getElementById('panel-invite')?.classList.add('hidden');
+}
+
+function resolveUserName() {
+  return (
+    (document.getElementById('f-user')?.value || '').trim() ||
+    (document.getElementById('w-user')?.value || '').trim() ||
+    (state.user || '').trim()
+  );
+}
+
+async function joinFriend() {
+  const raw = (document.getElementById('join-input')?.value || '').trim();
+  if (!raw) {
+    toast('Server ID likho', true);
+    return;
+  }
+  const btn = document.querySelector('#panel-join .btn-wizard');
+  if (btn) btn.disabled = true;
+  try {
+    const d = await post('/server/join', { invite: raw, user: resolveUserName() });
+    toast(d.msg || (d.ok ? 'Joined!' : 'Failed'), !d.ok);
+    if (d.ok) {
+      wizardPinnedOpen = false;
+      document.getElementById('join-input').value = '';
+      document.getElementById('panel-join')?.classList.add('hidden');
+      if (d.server_id) {
+        state.server_id = d.server_id;
+        const hero = document.getElementById('hero-server-id');
+        if (hero) hero.textContent = d.server_id;
+        const fk = document.getElementById('f-key');
+        if (d.project_key && fk) fk.value = d.project_key;
+      }
+      if (d.invite_code) inviteCache.invite_code = d.invite_code;
+      pollStatus();
+      loadInvite();
+    }
+  } catch (e) {
+    toast('Join failed — app chal rahi hai?', true);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 async function runQuickSetup() {
   const btn = document.getElementById('w-go');
   const st = document.getElementById('w-status');
   const name = (document.getElementById('w-user')?.value || '').trim();
   if (!name) {
     toast('Apna naam likho', true);
+    return;
+  }
+  if (wizardMode === 'join' && !(document.getElementById('w-invite')?.value || '').trim()) {
+    toast('Friend ka Server ID likho', true);
     return;
   }
   if (btn) btn.disabled = true;
@@ -85,7 +141,7 @@ async function runQuickSetup() {
     }
     if (d.ok && d.setup_complete) {
       wizardPinnedOpen = false;
-      toastOnce('setup-ok', 'Setup ho gaya!');
+      toastOnce('setup-ok', wizardMode === 'join' ? 'Group join ho gaya!' : 'Server ban gaya!');
       setTimeout(() => {
         pollStatus();
         loadInvite();
@@ -198,21 +254,9 @@ function applyStatus(d) {
   document.getElementById('s-state').className = 'v ' + ((d.running && !d.task?.running) ? 'ok' : (d.task?.running ? 'warn' : 'err'));
   document.getElementById('s-host').textContent = d.lock?.host || d.user || '-';
   document.getElementById('s-addr').textContent = d.running ? `${d.local_ip}:25565` : '---';
-  const syncRaw = String(d.syncthing_status || 'stopped').toLowerCase();
-  let syncLabel = syncRaw.toUpperCase();
-  if (d.sync_isolated) {
-    if (syncRaw === 'missing') syncLabel = 'NOT LINKED';
-    else if (syncRaw === 'running') syncLabel = 'NO PEERS';
-    else syncLabel = 'NOT READY';
-    document.getElementById('s-sync').className = 'v err';
-  } else if (syncRaw === 'connected') {
-    syncLabel = 'CONNECTED';
-    document.getElementById('s-sync').className = 'v ok';
-  } else {
-    document.getElementById('s-sync').className = 'v warn';
-  }
-  document.getElementById('s-sync').textContent = syncLabel;
   document.getElementById('s-players').textContent = `${d.players_count || 0}`;
+  const sg = document.getElementById('s-group');
+  if (sg) sg.textContent = d.server_id || '—';
 
   const sf = document.getElementById('s-friends');
   if (sf) {
@@ -226,8 +270,15 @@ function applyStatus(d) {
   if (hero) hero.textContent = d.server_id || '—';
   const sidHidden = document.getElementById('f-server-id');
   if (sidHidden) sidHidden.value = d.server_id || '';
+  const inviteLine = document.getElementById('invite-code-line');
+  if (inviteLine) {
+    const code = d.invite_code || (d.server_id ? `MCHOST:${d.server_id}` : '');
+    inviteLine.textContent = code || '—';
+    if (code) inviteCache.invite_code = code;
+  }
 
   updateSetupUI(d);
+  renderDeps(d.deps);
 
   const cpu = setFill('m-cpu', d.server_cpu_pct || 0);
   const mem = setFill('m-mem', d.server_mem_pct || 0);
@@ -290,12 +341,7 @@ function applyStatus(d) {
   if (fk && !fk.value.trim()) fk.value = d.project_key || '';
 
   if (d.server_id && d.server_id_on_disk && !d.server_id_synced) {
-    const mismatch = `Server ID mismatch: disk has ${d.server_id_on_disk}, settings have ${d.server_id}.`;
-    if (hint && !d.running) {
-      hint.textContent = mismatch;
-      hint.className = 'start-hint show';
-    }
-    toastOnce('sid-mismatch', mismatch, true);
+    toastOnce('sid-mismatch', `Syncing to Server ID ${d.server_id}… save or join again if needed.`, true);
   }
 
   if (d.last_error) {
@@ -447,17 +493,9 @@ async function toggleHost() {
   } else if (state.can_start === false) {
     toast(state.start_block_reason || 'Cannot start right now.', true);
     return;
-  } else if (state.sync_isolated) {
-    const ok = confirm(
-      'Syncthing is not linked to friends yet.\n\n' +
-      'If you start now, this PC uses its own copy of files (not shared).\n\n' +
-      'Continue only for solo testing?'
-    );
-    if (!ok) return;
   }
   try {
     const body = action === 'stop' ? { confirm_remote_stop: true } : {};
-    if (action === 'start' && state.sync_isolated) body.ack_isolated_risk = true;
     const d = await post('/host/' + action, body);
     toast(d.msg || (d.ok ? 'OK' : 'Failed'), !d.ok);
   } catch (e) {
@@ -585,7 +623,28 @@ async function downloadServerFiles() {
   }
 }
 
-let inviteCache = { invite: '', device_id: '' };
+let inviteCache = { invite: '', invite_code: '', device_id: '' };
+
+function renderDeps(deps) {
+  const el = document.getElementById('deps-banner');
+  if (!el || !deps) return;
+  if (deps.installing) {
+    el.classList.remove('hidden');
+    el.textContent = '⏳ Dependencies install ho rahi hain (Syncthing / Java)...';
+    return;
+  }
+  const missing = [];
+  if (!deps.syncthing_running) missing.push('Syncthing');
+  if (!deps.java_installed) missing.push('Java');
+  if (!deps.requests_ok) missing.push('requests');
+  if (!missing.length) {
+    el.classList.add('hidden');
+    el.textContent = '';
+    return;
+  }
+  el.classList.remove('hidden');
+  el.textContent = `⚠ Missing: ${missing.join(', ')} — auto-install try ho raha hai...`;
+}
 
 function renderSyncthing(d) {
   const devEl = document.getElementById('st-device-id');
@@ -598,13 +657,13 @@ function renderSyncthing(d) {
 
   const peers = Array.isArray(d.syncthing_peers) ? d.syncthing_peers : [];
   if (peersEl) {
-    if (!peers.length) {
-      peersEl.textContent = 'Syncthing peers: none added yet';
+    const syncRaw = String(d.syncthing_status || '').toLowerCase();
+    if (syncRaw === 'connected') {
+      peersEl.textContent = 'File sync: connected';
+    } else if (!peers.length) {
+      peersEl.textContent = 'File sync: invite friend for full world sync';
     } else {
-      peersEl.textContent = 'Syncthing peers: ' + peers.map((p) => {
-        const mark = p.connected ? '🟢' : '⚫';
-        return `${mark} ${p.name || p.device_id?.slice(0, 7)}`;
-      }).join(' · ');
+      peersEl.textContent = 'File sync: ' + peers.filter((p) => p.connected).length + ' peer(s) online';
     }
   }
 }
@@ -619,6 +678,7 @@ async function loadInvite() {
       return;
     }
     inviteCache.invite = d.invite || '';
+    inviteCache.invite_code = d.invite_code || d.invite || '';
     inviteCache.device_id = d.device_id || inviteCache.device_id;
     const devEl = document.getElementById('st-device-id');
     if (devEl && d.device_id) devEl.textContent = d.device_id;
@@ -643,36 +703,32 @@ async function copySyncthingDevice() {
 }
 
 async function copyInvite() {
-  if (!inviteCache.invite) await loadInvite();
-  if (!inviteCache.invite) {
-    toast('Invite not ready — start Syncthing first', true);
+  if (!inviteCache.invite_code) {
+    await loadInvite();
+    if (!inviteCache.invite_code && state.invite_code) {
+      inviteCache.invite_code = state.invite_code;
+    }
+  }
+  const text = inviteCache.invite_code || inviteCache.invite;
+  if (!text) {
+    toast('Pehle Create/Join karo — Server ID chahiye', true);
     return;
   }
   try {
-    await navigator.clipboard.writeText(inviteCache.invite);
-    toast('Invite copied (share with friends)');
+    await navigator.clipboard.writeText(text);
+    toast('Invite copied — friend Join friend se paste kare');
   } catch (e) {
     toast('Copy failed', true);
   }
 }
 
 async function applyInvite() {
-  const raw = (document.getElementById('f-invite')?.value || '').trim();
+  const raw = (document.getElementById('join-input')?.value || '').trim();
   if (!raw) {
-    toast('Paste invite JSON first', true);
+    toast('Server ID likho', true);
     return;
   }
-  try {
-    const d = await post('/syncthing/apply-invite', { invite: raw });
-    toast(d.msg || (d.ok ? 'Friend added' : 'Failed'), !d.ok);
-    if (d.ok && d.server_id) {
-      document.getElementById('f-server-id').value = d.server_id;
-    }
-    document.getElementById('f-invite').value = '';
-    setTimeout(() => { pollStatus(); loadInvite(); }, 300);
-  } catch (e) {
-    toast('Add friend failed', true);
-  }
+  await joinFriend();
 }
 
 function openSyncthing() {

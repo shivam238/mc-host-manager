@@ -53,7 +53,14 @@ class ServerController:
             jar_file = self._resolve_server_jar(server_path, jar_name)
             if jar_file is None:
                 return False, f"Server jar not found in {server_path}. Set correct 'server_jar' in Options."
-            cmd = ["java"] + java_args.split() + ["-jar", jar_file.name, "nogui"]
+            java_bin = "java"
+            try:
+                from utils.dependency_manager import resolve_java_binary
+
+                java_bin = resolve_java_binary() or "java"
+            except Exception:
+                pass
+            cmd = [java_bin] + java_args.split() + ["-jar", jar_file.name, "nogui"]
 
         try:
             with self.state_lock:

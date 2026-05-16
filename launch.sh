@@ -23,11 +23,19 @@ fi
 
 echo "  [INFO] Python: $("$PYTHON" -c 'import sys; print(sys.executable)')"
 
-# Ensure required runtime dependency.
-if ! "$PYTHON" -c "import requests" >/dev/null 2>&1; then
-  echo "  [INFO] Installing missing dependency: requests"
-  "$PYTHON" -m pip install --upgrade pip
-  "$PYTHON" -m pip install requests
+# Bootstrap Python + Syncthing + Java (first run may download; safe to skip if offline).
+echo "  [INFO] Checking dependencies (Syncthing, Java, requests)..."
+if ! "$PYTHON" -c "
+from utils.dependency_manager import ensure_all_dependencies
+r = ensure_all_dependencies()
+import sys
+sys.exit(0 if r.get('ok') else 0)
+" 2>/dev/null; then
+  if ! "$PYTHON" -c "import requests" >/dev/null 2>&1; then
+    echo "  [INFO] Installing missing dependency: requests"
+    "$PYTHON" -m pip install --upgrade pip
+    "$PYTHON" -m pip install requests
+  fi
 fi
 
 PORT=7842

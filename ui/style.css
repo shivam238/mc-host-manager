@@ -366,6 +366,11 @@ input:focus, select:focus { border-color: #3da2ff; }
   line-height: 1.45;
 }
 .ready-banner.hidden { display: none; }
+.deps-banner {
+  border-color: #8a6a12;
+  background: #2a2208;
+  color: #ffe8a8;
+}
 .btn-ghost {
   background: transparent;
   border: 1px solid var(--line);
@@ -384,6 +389,43 @@ input:focus, select:focus { border-color: #3da2ff; }
 .compact-grid { grid-template-columns: auto 1fr !important; }
 .members-list.compact .member-row { padding: 6px 8px; font-size: .88rem; }
 #s-friends.ok { color: var(--ok); }
+.friends-card h3 { margin: 0 0 6px; }
+.group-box {
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: rgba(6, 18, 36, 0.6);
+  text-align: center;
+}
+.friend-panel {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px dashed var(--line);
+  background: rgba(8, 22, 44, 0.5);
+}
+.friend-panel.hidden { display: none; }
+.qr-small {
+  display: block;
+  margin: 10px auto;
+  max-width: 140px;
+  border-radius: 8px;
+  background: #fff;
+}
+.invite-code-box {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: rgba(4, 12, 28, 0.55);
+  text-align: center;
+}
+.small-mono {
+  font-size: .95rem;
+  letter-spacing: .06em;
+  word-break: break-all;
+}
 
 @media (max-width: 980px) {
   .grid { grid-template-columns: 1fr; }

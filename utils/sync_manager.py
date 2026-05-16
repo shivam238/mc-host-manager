@@ -54,20 +54,12 @@ class SyncManager:
         return self._session.request(method, f"{self.url}{path}", headers=headers, timeout=timeout, **kwargs)
 
     def _get_api_key(self) -> str:
-        paths: list[Path] = [Path.home() / ".config/syncthing/config.xml"]
-        system = platform.system()
-        if system == "Windows":
-            appdata = os.environ.get("APPDATA")
-            localapp = os.environ.get("LOCALAPPDATA")
-            if appdata:
-                paths.append(Path(appdata) / "Syncthing/config.xml")
-            if localapp:
-                paths.append(Path(localapp) / "Syncthing/config.xml")
-        else:
-            paths.extend([
-                Path.home() / ".local/share/syncthing/config.xml",
-                Path.home() / ".local/state/syncthing/config.xml",
-            ])
+        try:
+            from utils.dependency_manager import syncthing_config_paths
+
+            paths = syncthing_config_paths()
+        except Exception:
+            paths = [Path.home() / ".config/syncthing/config.xml"]
 
         seen = set()
         for p in paths:

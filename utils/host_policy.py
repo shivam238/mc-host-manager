@@ -67,19 +67,19 @@ def evaluate_start_gate(
             return out
 
     if isolated:
-        out["can_start"] = False
+        out["can_start"] = True
+        out["sync_isolated"] = True
         if not syn_h.get("running"):
             out["start_block_reason"] = (
-                "Syncthing is not running. Friends are not sharing the same files yet."
+                "Tip: Start Syncthing so friends share the same world files."
             )
         elif not syn_h.get("folder_exists", False):
-            fid = get_syncthing_folder(cfg)
             out["start_block_reason"] = (
-                f'Syncthing folder "{fid}" is missing. Save settings to auto-create it.'
+                "Tip: Syncthing folder will be created when you save or join."
             )
         else:
             out["start_block_reason"] = (
-                "No friend connected in Syncthing (0 peers). Wait until sync shows CONNECTED."
+                "Tip: No Syncthing peers yet — use Invite Friend so others can sync files."
             )
         return out
 

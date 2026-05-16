@@ -34,6 +34,8 @@ from utils.flow_manager import (
 )
 from utils.host_policy import evaluate_start_gate
 from utils.setup_flow import is_setup_complete, run_quick_setup, build_next_steps
+from utils.group_manager import create_server_group, join_server_group, format_invite_code, parse_invite_input
+from utils import dependency_manager
 
 def read_json(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
     length = int(handler.headers.get("Content-Length", 0) or 0)
@@ -219,6 +221,8 @@ def get_status(cfg: dict[str, Any]) -> dict[str, Any]:
         "start_block_reason": str(gate.get("start_block_reason") or ""),
         "sync_isolated": bool(gate.get("sync_isolated")),
         "remote_host": str(gate.get("remote_host") or ""),
+        "invite_code": format_invite_code(server_id),
+        "deps": cache_get("deps_status", 2.5, dependency_manager.status_snapshot),
     }
 
 class APIHandler(BaseHTTPRequestHandler):
@@ -308,20 +312,26 @@ class APIHandler(BaseHTTPRequestHandler):
             self._json(members_registry.members_summary(shared, lock_host=host))
             return
 
+        if self.path == "/deps/status":
+            self._json({"ok": True, **dependency_manager.status_snapshot()})
+            return
+
         if self.path == "/syncthing/invite":
             sid = str(cfg.get("server_id", "") or "").strip()
             folder = get_syncthing_folder(cfg)
             payload = st_api.build_invite_payload(sid, folder)
             invite_text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+            simple = format_invite_code(sid, str(payload.get("device_id", "") or ""))
             self._json(
                 {
-                    "ok": bool(payload.get("device_id")),
+                    "ok": bool(sid),
                     "server_id": sid,
                     "folder_id": folder,
                     "device_id": payload.get("device_id", ""),
                     "device_name": payload.get("device_name", ""),
                     "invite": invite_text,
-                    "qr_url": st_api.invite_qr_url(invite_text) if payload.get("device_id") else "",
+                    "invite_code": simple or format_invite_code(sid),
+                    "qr_url": st_api.invite_qr_url(simple or invite_text) if sid else "",
                     "syncthing_ui": "http://127.0.0.1:8384/",
                 }
             )
@@ -450,6 +460,16 @@ class APIHandler(BaseHTTPRequestHandler):
             self._json(result, code=200 if result.get("ok") else 400)
             return
 
+        if self.path == "/deps/install":
+            result = dependency_manager.ensure_all_dependencies()
+            try:
+                st_api.refresh_api_key()
+            except Exception:
+                pass
+            clear_cache()
+            self._json(result, code=200 if result.get("ok") else 500)
+            return
+
         if self.path == "/config/save":
             if "user" in body:
                 save_user(str(body.get("user", "")))
@@ -517,40 +537,52 @@ class APIHandler(BaseHTTPRequestHandler):
             )
             return
 
-        if self.path == "/server/join":
-            sid = normalize_server_id(str(body.get("server_id", "")))
-            if len(sid) < 4:
-                self._json({"ok": False, "msg": "Server ID must be at least 4 characters."})
-                return
-            cfg["server_id"] = sid
-            if body.get("server_dir"):
-                cfg["server_dir"] = normalize_path(str(body.get("server_dir", "")))
-            saved = resolve_layout(save_config(cfg), create_shared=True)
-            shared = normalize_path(saved.get("shared_dir", ""))
-            on_disk = read_server_id_file(shared) if shared else ""
-            if on_disk and on_disk != sid:
-                self._json(
-                    {
-                        "ok": False,
-                        "msg": f"This folder belongs to Server ID {on_disk}, not {sid}.",
-                    }
-                )
-                return
-            ensure_project_key(saved)
-            syn_folder = get_syncthing_folder(saved)
-            if shared:
-                st_api.ensure_folder(syn_folder, shared)
-                members_registry.touch_presence(shared, server_id=sid, hosting=False)
-            clear_cache()
-            self._json(
-                {
-                    "ok": True,
-                    "msg": "Joined server group.",
-                    "server_id": sid,
-                    "shared_dir": shared,
-                    "syncthing_folder": syn_folder,
-                }
+        if self.path == "/server/create":
+            result = create_server_group(
+                user=str(body.get("user", "") or load_user()),
+                server_dir=str(body.get("server_dir", "") or ""),
+                project_name=str(body.get("project_name", "") or "Minecraft Server"),
+                st_api=st_api,
             )
+            if result.get("ok"):
+                shared = normalize_path(result.get("shared_dir", ""))
+                if shared:
+                    syn_folder = result.get("syncthing_folder") or get_syncthing_folder(load_config(force=True))
+                    inv = st_api.build_invite_payload(str(result.get("server_id", "")), syn_folder)
+                    try:
+                        Path(shared).joinpath("invite.json").write_text(
+                            json.dumps(inv, ensure_ascii=False, indent=2),
+                            encoding="utf-8",
+                        )
+                    except Exception:
+                        pass
+            clear_cache()
+            self._json(result, code=200 if result.get("ok") else 400)
+            return
+
+        if self.path == "/server/join":
+            raw = str(
+                body.get("invite")
+                or body.get("friend_invite")
+                or body.get("invite_code")
+                or body.get("server_id")
+                or ""
+            ).strip()
+            parsed = parse_invite_input(raw)
+            result = join_server_group(
+                invite_raw=raw,
+                server_id=str(body.get("server_id", "") or parsed.get("server_id", "")),
+                user=str(body.get("user", "") or load_user()),
+                server_dir=str(body.get("server_dir", "") or ""),
+                st_api=st_api,
+            )
+            if result.get("ok"):
+                shared = normalize_path(result.get("shared_dir", ""))
+                if shared:
+                    syn_folder = result.get("syncthing_folder") or get_syncthing_folder(load_config(force=True))
+                    st_api.ensure_folder(syn_folder, shared)
+            clear_cache()
+            self._json(result, code=200 if result.get("ok") else 400)
             return
 
         if self.path == "/host/start":
@@ -674,21 +706,15 @@ class APIHandler(BaseHTTPRequestHandler):
         if self.path == "/syncthing/apply-invite":
             invite_raw = str(body.get("invite", "") or body.get("payload", "") or "").strip()
             if not invite_raw:
-                self._json({"ok": False, "msg": "Paste invite JSON or scan QR text."})
+                self._json({"ok": False, "msg": "Paste invite code or Server ID."})
                 return
-            try:
-                payload = json.loads(invite_raw)
-            except Exception:
-                payload = {"device_id": invite_raw}
-            sid_from_invite = ""
-            if isinstance(payload, dict):
-                sid_from_invite = normalize_server_id(str(payload.get("server_id", "")))
-            if sid_from_invite:
-                cfg["server_id"] = sid_from_invite
-                cfg = save_config(cfg)
-            ok, msg = st_api.apply_invite_payload(payload if isinstance(payload, dict) else {})
+            result = join_server_group(
+                invite_raw=invite_raw,
+                user=str(body.get("user", "") or load_user()),
+                st_api=st_api,
+            )
             clear_cache()
-            self._json({"ok": ok, "msg": msg, "server_id": cfg.get("server_id", "")})
+            self._json(result, code=200 if result.get("ok") else 400)
             return
 
         if self.path == "/sync/now":

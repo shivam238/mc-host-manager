@@ -22,10 +22,14 @@ echo.
 echo   Band karne ke liye: Ctrl+C or window band karo
 echo.
 
-%PYTHON_CMD% -c "import requests" >nul 2>&1
+echo   Checking dependencies (Syncthing, Java, requests)...
+%PYTHON_CMD% -c "from utils.dependency_manager import ensure_all_dependencies; ensure_all_dependencies()" >nul 2>&1
 if errorlevel 1 (
-    echo   Installing required Python packages...
-    %PYTHON_CMD% -m pip install --user requests
+    %PYTHON_CMD% -c "import requests" >nul 2>&1
+    if errorlevel 1 (
+        echo   Installing required Python packages...
+        %PYTHON_CMD% -m pip install --user requests
+    )
 )
 
 set "APP_PORT=7842"

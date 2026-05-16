@@ -7,27 +7,25 @@
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
-  <!-- Quick Setup Wizard (first time) -->
   <div id="wizard" class="wizard">
     <div class="wizard-card">
       <h2 class="wizard-title">Quick Setup</h2>
-      <p class="wizard-lead">Bas 1 minute — server folder khud detect hoga, baaki hum sambhal lenge.</p>
+      <p class="wizard-lead">Naam likho, phir ya to naya server banao ya friend ka Server ID se join karo.</p>
 
       <label class="lbl">Tumhara naam</label>
       <input id="w-user" class="inp" placeholder="e.g. Shivam" />
 
-      <p class="lbl" style="margin-top:14px;">Tum kya kar rahe ho?</p>
       <div class="wizard-tabs">
-        <button type="button" id="w-tab-host" class="tab on" onclick="setWizardMode('host')">🆕 Naya server (main host)</button>
-        <button type="button" id="w-tab-join" class="tab" onclick="setWizardMode('join')">🤝 Friend ka server join</button>
+        <button type="button" id="w-tab-host" class="tab on" onclick="setWizardMode('host')">🆕 Create server</button>
+        <button type="button" id="w-tab-join" class="tab" onclick="setWizardMode('join')">🤝 Join friend</button>
       </div>
 
       <div id="w-join-box" class="hidden">
-        <label class="lbl">Friend ka invite paste karo (QR se) ya Server ID</label>
-        <textarea id="w-invite" class="inp ta" placeholder='Invite JSON ya Server ID jaise A1B2C3D4'></textarea>
+        <label class="lbl">Friend ka Server ID ya invite code</label>
+        <input id="w-invite" class="inp" placeholder="e.g. A1B2C3D4 or MCHOST:A1B2C3D4" />
       </div>
 
-      <button type="button" id="w-go" class="btn-wizard" onclick="runQuickSetup()">✨ Automatic Setup</button>
+      <button type="button" id="w-go" class="btn-wizard" onclick="runQuickSetup()">✨ Continue</button>
       <button type="button" id="w-back-dash" class="btn-wizard secondary hidden" onclick="closeWizardToDashboard()">← Back to dashboard</button>
       <div id="w-status" class="wizard-status"></div>
     </div>
@@ -46,6 +44,7 @@
     </div>
 
     <div id="ready-banner" class="ready-banner hidden"></div>
+    <div id="deps-banner" class="ready-banner deps-banner hidden"></div>
 
     <div class="grid">
       <div class="card">
@@ -53,8 +52,8 @@
           <div class="stat"><div class="k">Server</div><div id="s-state" class="v">Offline</div></div>
           <div class="stat"><div class="k">Host</div><div id="s-host" class="v">-</div></div>
           <div class="stat"><div class="k">Play at</div><div id="s-addr" class="v cyan">-</div></div>
+          <div class="stat"><div class="k">Group</div><div id="s-group" class="v cyan">—</div></div>
           <div class="stat"><div class="k">Friends</div><div id="s-friends" class="v">0</div></div>
-          <div class="stat"><div class="k">Sync</div><div id="s-sync" class="v">-</div></div>
           <div class="stat"><div class="k">Players</div><div id="s-players" class="v">0</div></div>
         </div>
 
@@ -93,32 +92,46 @@
       </div>
 
       <div class="side-col">
-        <div class="card hero-id">
-          <div class="small">Server ID — friends ko bhejo</div>
-          <div id="hero-server-id" class="hero-id-val">—</div>
-          <div class="actions" style="grid-template-columns:1fr 1fr;margin-top:10px;">
-            <button type="button" onclick="copyServerId()">📋 Copy ID</button>
-            <button type="button" onclick="copyInvite()">📨 Copy invite</button>
+        <div class="card friends-card">
+          <h3>Friends &amp; Server Group</h3>
+          <div class="small">Same Server ID = same group. Lock stops two hosts at once.</div>
+
+          <div class="group-box">
+            <div class="small">Your Server ID</div>
+            <div id="hero-server-id" class="hero-id-val">—</div>
           </div>
-          <div id="members-summary" class="small" style="margin-top:10px;">—</div>
+
+          <div class="actions" style="grid-template-columns:1fr 1fr;margin-top:12px;">
+            <button type="button" class="btn-good" onclick="openInvitePanel()">📨 Invite friend</button>
+            <button type="button" onclick="openJoinPanel()">🤝 Join friend</button>
+          </div>
+
+          <div id="panel-invite" class="friend-panel hidden">
+            <p class="small">Friend ko Server ID ya poora invite bhejo (WhatsApp).</p>
+            <div class="invite-code-box">
+              <div class="small">Invite code</div>
+              <div id="invite-code-line" class="hero-id-val small-mono">—</div>
+            </div>
+            <img id="st-qr" alt="QR" class="qr-small" />
+            <div class="actions" style="grid-template-columns:1fr 1fr;">
+              <button type="button" onclick="copyServerId()">Copy Server ID</button>
+              <button type="button" onclick="copyInvite()">Copy invite</button>
+            </div>
+          </div>
+
+          <div id="panel-join" class="friend-panel hidden">
+            <label class="lbl">Friend ka Server ID / invite</label>
+            <input id="join-input" class="inp" placeholder="Server ID e.g. A1B2C3D4" />
+            <button type="button" class="btn-wizard" style="margin-top:8px;" onclick="joinFriend()">Join this group</button>
+          </div>
+
+          <div id="members-summary" class="small" style="margin-top:12px;">—</div>
           <div id="members-list" class="members-list compact"></div>
+          <div id="st-peers" class="small" style="margin-top:8px;"></div>
         </div>
 
         <details class="card fold">
-          <summary>🤝 Friend connect (Syncthing)</summary>
-          <div class="small" style="margin:8px 0;">Optional: files sync ke liye. Invite share karo ya paste karo.</div>
-          <div class="invite-grid compact-grid">
-            <img id="st-qr" alt="QR" width="120" height="120" />
-            <div>
-              <input id="f-invite" class="inp" placeholder="Friend invite paste..." />
-              <button type="button" style="margin-top:8px;width:100%;" onclick="applyInvite()">Add friend</button>
-            </div>
-          </div>
-          <div id="st-peers" class="small">—</div>
-        </details>
-
-        <details class="card fold">
-          <summary>⚙ Advanced settings</summary>
+          <summary>⚙ Advanced</summary>
           <div class="row"><label>User</label><input id="f-user" /></div>
           <div class="row"><label>Server folder</label>
             <div style="display:flex;gap:6px;">
@@ -128,7 +141,7 @@
           </div>
           <input type="hidden" id="f-server-id" />
           <input type="hidden" id="f-shared" />
-          <input type="hidden" id="f-project" />
+          <input type="hidden" id="f-project" value="Minecraft Server" />
           <input type="hidden" id="f-key" />
           <div id="st-device-id" class="hidden"></div>
           <div class="row inline">
@@ -138,9 +151,6 @@
             <div><label>Max players</label><input id="f-max" type="number" value="20" /></div>
           </div>
           <div class="row"><label>JAR</label><input id="f-jar" value="server.jar" /></div>
-          <div class="row">
-            <label><input id="f-whitelist" type="checkbox" style="width:auto;"> Whitelist</label>
-          </div>
           <div class="actions" style="grid-template-columns:1fr 1fr;margin-top:8px;">
             <button onclick="saveSettings()">Save</button>
             <button class="btn-danger" onclick="forceClear()">Clear lock</button>

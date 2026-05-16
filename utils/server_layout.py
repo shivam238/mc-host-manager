@@ -154,7 +154,12 @@ def resolve_layout(cfg: dict[str, Any], *, create_shared: bool = True) -> dict[s
         ensure_shared_layout(shared_dir)
 
     sid = normalize_server_id(str(out.get("server_id", "") or ""))
+    overwrite_sid = bool(out.pop("_overwrite_server_id", False))
     file_sid = read_server_id_file(shared_dir) if shared_dir else ""
+
+    if overwrite_sid and sid and shared_dir:
+        write_server_id_file(shared_dir, sid)
+        file_sid = sid
 
     if file_sid and sid and file_sid != sid:
         out["server_id_mismatch"] = True

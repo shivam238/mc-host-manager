@@ -31,6 +31,7 @@ from utils.flow_manager import st_api
 from utils.app_state import host_lock, host_state, is_task_running
 from utils.flow_manager import mc_server, finalize_stop_flow
 from api_handler import APIHandler
+from utils.dependency_manager import ensure_dependencies_background
 
 # ---------------------------------------------------------------------------
 # Monitors
@@ -157,6 +158,8 @@ if __name__ == "__main__":
         signal.signal(signal.SIGINT, _signal)
     if hasattr(signal, "SIGTERM"):
         signal.signal(signal.SIGTERM, _signal)
+
+    ensure_dependencies_background()
 
     cfg = load_config(force=True)
     if not cfg.get("project_key"):
