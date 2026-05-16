@@ -248,6 +248,15 @@ def get_status(cfg: dict[str, Any]) -> dict[str, Any]:
         "Run Quick Setup to detect your server and create a Server ID.",
     ]
 
+    can_start_val = bool(gate.get("can_start"))
+    block_reason = str(gate.get("start_block_reason") or "")
+
+    # Hard Block: If anyone in the group is already hosting, we CANNOT start.
+    if any_hosting and not running:
+        can_start_val = False
+        if not block_reason:
+            block_reason = f"{remote_host_name or 'Someone'} is already hosting."
+
     return {
         "setup_complete": setup_done,
         "setup_next_steps": next_steps,
@@ -296,8 +305,8 @@ def get_status(cfg: dict[str, Any]) -> dict[str, Any]:
         "server_mem_pct": int(m.get("mem_pct", 0)),
         "server_disk_pct": int(m.get("disk_pct", 0)),
         "can_open_server_files": (not running and not is_task_running()),
-        "can_start": bool(gate.get("can_start")),
-        "start_block_reason": str(gate.get("start_block_reason") or ""),
+        "can_start": can_start_val,
+        "start_block_reason": block_reason,
         "sync_isolated": bool(gate.get("sync_isolated")),
         "remote_host": str(gate.get("remote_host") or ""),
         "remote_lock_peer": str((remote_lock or {}).get("peer_ip", "") or ""),
