@@ -54,9 +54,6 @@ class TunnelManager:
         proc = self.proc
         if proc is not None:
             try:
-                # Lazy-import subprocess for termination
-                import subprocess as _sub
-
                 proc.terminate()
                 proc.wait(timeout=5)
             except Exception:

@@ -1,31 +1,39 @@
-# Python cache
+# Python artifacts
 __pycache__/
 *.py[cod]
-
-# Virtual env / local tooling
-venv/
-.venv/
-.vscode/
-
-# Build artifacts
+*$py.class
+*.so
 build/
 dist/
+*.egg-info/
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+ENV/
+
+# IDEs
+.vscode/
+.idea/
+
+# Build and Release
+bin/
 release/
 *.spec
 
-# Runtime/user-local data
+# Runtime data
 .env
-.pyre_configuration
-app_data/settings.json
-app_data/current_host.txt
-current_host.txt
+app_data/
 *.log
 *.tmp
+current_host.txt
 
-# Accidental local import folder (do not publish)
-C:\\Users\\user\\Downloads\\New folder\\server/
+# Minecraft specific
+server/
+backups/
+shared/
 
-# Ignore any accidental Windows-import style folders
-C:*
-
-app_data/
+# OS specific
+.DS_Store
+Thumbs.db
