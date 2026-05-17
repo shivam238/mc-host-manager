@@ -485,14 +485,30 @@ class APIHandler(BaseHTTPRequestHandler):
             return
 
         if self.path.startswith("/remote/logs"):
-            from urllib.parse import parse_qs, urlparse
             qs = parse_qs(urlparse(self.path).query)
             ip = qs.get("ip", [""])[0]
+            
+            # Check if we can read the console tail locally from the synced shared directory!
+            # This completely bypasses firewalls and NAT blocks.
+            shared = normalize_path(cfg.get("shared_dir", ""))
+            if shared:
+                console_file = Path(shared) / ".remote_console.json"
+                if console_file.is_file():
+                    try:
+                        mtime = console_file.stat().st_mtime
+                        if (time.time() - mtime) < 600:  # 10 minutes tolerance for clock skews & Syncthing sync latency
+                            data = json.loads(console_file.read_text(encoding="utf-8", errors="replace"))
+                            if isinstance(data, dict) and "logs" in data:
+                                self._json(data)
+                                return
+                    except Exception:
+                        pass
+
             if not ip:
                 self._json({"logs": ["Error: Missing IP for remote logs"]})
                 return
             try:
-                # Proxy the request to the remote manager
+                # Proxy the request to the remote manager over LAN as a fallback
                 r = requests.get(f"http://{ip}:7842/logs", timeout=2.0)
                 if r.status_code == 200:
                     self._json(r.json())

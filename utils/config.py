@@ -47,7 +47,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "strict_sync_gate": False,
     "auto_world_before_start": True,
     "http_lock_enabled": True,
-    "firebase_url": "",
+    "firebase_url": "https://mc-host-sync-default-rtdb.firebaseio.com/",
 }
 
 config_lock = threading.Lock()
@@ -96,7 +96,7 @@ def _normalize_cfg(raw: dict[str, Any] | None) -> dict[str, Any]:
     cfg["project_name"] = str(cfg.get("project_name", "Minecraft Server") or "Minecraft Server").strip()
     cfg["project_key"] = str(cfg.get("project_key", "") or "").strip()
     cfg["server_id"] = str(cfg.get("server_id", "") or "").strip().upper()
-    cfg["firebase_url"] = str(cfg.get("firebase_url", "") or "").strip()
+    cfg["firebase_url"] = str(cfg.get("firebase_url", "") or "https://mc-host-sync-default-rtdb.firebaseio.com/").strip()
     return cfg
 
 def load_config(force: bool = False) -> dict[str, Any]:

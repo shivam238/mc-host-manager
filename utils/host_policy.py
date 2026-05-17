@@ -63,7 +63,12 @@ def evaluate_start_gate(
         remote = str(lock_info.get("host", "") or "").strip()
         if remote and remote != user:
             out["can_start"] = False
-            out["remote_host"] = remote
+            out["remote_host"] = {
+                "user": remote,
+                "ip": str(lock_info.get("ip") or ""),
+                "hostname": str(lock_info.get("hostname") or ""),
+                "node_id": str(lock_info.get("owner_node_id") or ""),
+            }
             ui = str(lock_info.get("ui_url", "") or "").strip()
             hint = f" Open {ui}" if ui else ""
             out["start_block_reason"] = f"{remote} is hosting right now.{hint}"
@@ -92,7 +97,12 @@ def evaluate_start_gate(
         if peer_hosting and remote_user:
             if remote_user.lower() != user.lower():
                 out["can_start"] = False
-                out["remote_host"] = remote_user
+                out["remote_host"] = {
+                    "user": remote_user,
+                    "ip": peer_ip,
+                    "hostname": remote_host,
+                    "node_id": str(remote_lock.get("node_id") or ""),
+                }
                 hint = f" ({peer_ip})" if peer_ip else ""
                 out["start_block_reason"] = (
                     f"{remote_user} is hosting on another PC{hint}. "

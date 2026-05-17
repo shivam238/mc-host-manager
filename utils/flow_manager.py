@@ -164,6 +164,18 @@ def finalize_stop_flow(cfg: dict[str, Any], cb, reason: str = "normal") -> None:
     except Exception:
         pass
 
+    # Update presence immediately as offline
+    try:
+        from utils import members_registry
+        members_registry.touch_presence(shared, server_id=cfg["server_id"], hosting=False)
+        fb_url = cfg.get("firebase_url", "")
+        sid = cfg.get("server_id", "")
+        if fb_url and sid:
+            from utils import matchmaker
+            matchmaker.touch_presence(fb_url, sid, get_node_id(), hosting=False)
+    except Exception:
+        pass
+
     with host_lock:
         host_state["active"] = False
         host_state["ready"] = False
@@ -227,12 +239,24 @@ def start_flow(cfg: dict[str, Any], cb) -> None:
 
         cb(72, "Starting server...")
         ram_args = f"-Xmx{cfg['ram']} -Xms2G"
-        ok_start, msg_start = mc_server.start(server, str(cfg.get("server_jar", "server.jar")), ram_args)
+        ok_start, msg_start = mc_server.start(server, str(cfg.get("server_jar", "server.jar")), ram_args, shared_dir=shared)
         if not ok_start:
             raise RuntimeError(msg_start)
 
         with host_lock:
             host_state["last_error"] = ""
+            
+        # Update presence immediately as hosting
+        try:
+            from utils import members_registry
+            members_registry.touch_presence(shared, server_id=cfg["server_id"], hosting=True)
+            fb_url = cfg.get("firebase_url", "")
+            if fb_url:
+                from utils import matchmaker
+                matchmaker.touch_presence(fb_url, cfg["server_id"], get_node_id(), hosting=True)
+        except Exception:
+            pass
+
         cb(100, "Server started")
     except Exception:
         lock_manager.remove_lock(shared)

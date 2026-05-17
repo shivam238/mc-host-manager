@@ -45,29 +45,44 @@ def prepare_then_start(cfg, cb, start_fn, auto_pull=False, host_ip="", ack_world
     start_fn(cfg, cb)
 
 def wait_peer_stopped(ip: str, sid: str, timeout: int = 45):
-    """Wait until the peer has released the lock in Firebase."""
+    """Wait until the peer has released the lock (supports Firebase and local Syncthing file lock)."""
     cfg = load_config()
     fb_url = cfg.get("firebase_url")
-    if not fb_url: return True, ""
+    shared = normalize_path(cfg.get("shared_dir", ""))
     
+    if not fb_url and not shared:
+        return True, ""
+        
     end = time.time() + timeout
     while time.time() < end:
-        is_ok, _, lock_data = matchmaker.get_lock_data(fb_url, sid)
-        if is_ok:
-            if not lock_data:
-                # Lock is gone! Wait 2 more seconds for OS/Syncthing cleanup safety
-                time.sleep(2)
+        # 1. Check Firebase if configured
+        if fb_url:
+            is_ok, _, lock_data = matchmaker.get_lock_data(fb_url, sid)
+            if is_ok:
+                if not lock_data:
+                    # Lock is gone! Wait 2 more seconds for OS/Syncthing cleanup safety
+                    time.sleep(2)
+                    return True, ""
+                
+                # Check if lock is old/stale
+                now = int(time.time())
+                ls = lock_data.get("t", 0)
+                if (now - ls) >= 45:
+                    # Stale lock! Wait 1 more second for safety
+                    time.sleep(1)
+                    return True, ""
+
+        # 2. Check local file lock (crucial for local/LAN setups where Firebase is not configured)
+        if shared:
+            existing = lock_manager.get_lock(shared)
+            if not existing or existing.get("expired"):
+                # Syncthing has successfully synced the lock file deletion from the stopped peer!
+                time.sleep(2.5) # Extra delay for final file system/Syncthing propagation stability
                 return True, ""
-            
-            # Check if lock is old/stale
-            now = int(time.time())
-            ls = lock_data.get("t", 0)
-            if (now - ls) >= 45:
-                # Stale lock! Wait 1 more second for safety
-                time.sleep(1)
-                return True, ""
+                
         time.sleep(3)
-    return False, "Timed out waiting for peer to release lock in Firebase."
+    return False, "Timed out waiting for peer to release lock."
+
 
 def switch_host_flow(cfg: dict[str, Any], cb: Callable[[int, str], None], auto_start=True, start_fn=None, **kwargs) -> None:
     """Orchestrates the host role handover."""
@@ -114,7 +129,17 @@ def switch_host_flow(cfg: dict[str, Any], cb: Callable[[int, str], None], auto_s
                 )
                 if ip:
                     import requests
-                    requests.post(f"http://{ip}:7842/host/stop", json={"ack_remote": True}, timeout=2.0)
+                    # Pass the project key so the remote host accepts the control command over LAN
+                    project_key = cfg.get("project_key", "")
+                    requests.post(
+                        f"http://{ip}:7842/host/stop",
+                        json={
+                            "ack_remote": True,
+                            "project_key": project_key
+                        },
+                        headers={"X-MC-Project-Key": project_key},
+                        timeout=2.0
+                    )
             except Exception:
                 pass
             
@@ -126,6 +151,29 @@ def switch_host_flow(cfg: dict[str, Any], cb: Callable[[int, str], None], auto_s
     if not auto_start:
         cb(100, "Remote host stopped. You can now host manually.")
         return
+
+    # Wait for Syncthing sync to complete before starting
+    syn_folder = get_syncthing_folder(cfg)
+    if syn_folder:
+        cb(40, "Syncing latest world files from previous host...")
+        try:
+            st_api.scan_folder(syn_folder)
+        except Exception:
+            pass
+        
+        # Wait up to 30 seconds for pending items to clear
+        end_sync = time.time() + 30
+        while time.time() < end_sync:
+            try:
+                pending = st_api.get_pending_count(syn_folder)
+            except Exception:
+                pending = 0
+            
+            if pending <= 0:
+                break
+            
+            cb(40 + int((30 - (end_sync - time.time())) * 0.3), f"Syncing latest world files ({pending} files remaining)...")
+            time.sleep(2.0)
 
     cb(50, "Switching role to host...")
     start_fn(cfg, cb)

@@ -33,7 +33,7 @@ class ServerController:
     def is_running(self):
         return self.proc is not None and self.proc.poll() is None
 
-    def start(self, server_dir, jar_name, java_args):
+    def start(self, server_dir, jar_name, java_args, shared_dir=None):
         if self.is_running(): return False, "Already running"
         
         server_path = Path(server_dir)
@@ -87,6 +87,23 @@ class ServerController:
                             self.logs.append(line)
             
             threading.Thread(target=reader, daemon=True).start()
+
+            if shared_dir:
+                def log_sync_worker():
+                    shared_path = Path(shared_dir)
+                    console_file = shared_path / ".remote_console.json"
+                    while self.is_running():
+                        try:
+                            lines = self.get_logs(100)
+                            tmp = console_file.with_suffix(".tmp")
+                            import json
+                            tmp.write_text(json.dumps({"logs": lines}, ensure_ascii=False, indent=2), encoding="utf-8")
+                            tmp.replace(console_file)
+                        except Exception:
+                            pass
+                        time.sleep(1.5)
+                threading.Thread(target=log_sync_worker, daemon=True).start()
+
             return True, "Server started"
         except Exception as e:
             return False, str(e)
