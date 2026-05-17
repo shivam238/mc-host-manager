@@ -159,7 +159,7 @@ def monitor_lock_heartbeat() -> None:
                             with host_lock:
                                 host_state["active"] = False
                             from utils.flow_manager import finalize_stop_flow
-                            threading.Thread(target=lambda: finalize_stop_flow(cfg, reason="remote_signal"), daemon=True).start()
+                            threading.Thread(target=lambda: finalize_stop_flow(cfg, cb=lambda *_: None, reason="remote_signal"), daemon=True).start()
                             continue
                     elif cmd_str.startswith("mc:"):
                         if not target or target == my_id or target == "ANY":
@@ -184,7 +184,7 @@ def monitor_lock_heartbeat() -> None:
                     with host_lock:
                         host_state["active"] = False
                     from utils.flow_manager import finalize_stop_flow
-                    threading.Thread(target=lambda: finalize_stop_flow(cfg, reason="conflict_shutdown"), daemon=True).start()
+                    threading.Thread(target=lambda: finalize_stop_flow(cfg, cb=lambda *_: None, reason="conflict_shutdown"), daemon=True).start()
                     continue
 
             # 3. Renew our own lock

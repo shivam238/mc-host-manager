@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from utils import backup_manager, lock_manager, server_controller, sync_manager
-from utils.config import normalize_path, ensure_project_key, load_user, get_node_id, ensure_shared_layout, get_syncthing_folder
+from utils.config import normalize_path, ensure_project_key, load_user, get_node_id, ensure_shared_layout, get_syncthing_folder, get_local_ip
 from utils.app_state import host_lock, host_state, task_lock, task_status, clear_cache
 
 st_api = sync_manager.SyncManager()
@@ -222,6 +222,27 @@ def start_flow(cfg: dict[str, Any], cb) -> None:
     )
     if not ok_lock:
         raise RuntimeError(msg_lock)
+
+    # Acquire cloud lock immediately on startup if configured!
+    fb_url = cfg.get("firebase_url", "")
+    sid = cfg.get("server_id", "")
+    if fb_url and sid:
+        from utils import matchmaker
+        import socket
+        cb(25, "Acquiring cloud lock...")
+        ok_cloud, msg_cloud = matchmaker.acquire_lock(
+            fb_url,
+            sid,
+            {
+                "node_id": get_node_id(),
+                "user": user,
+                "hostname": socket.gethostname(),
+                "ip": get_local_ip()
+            }
+        )
+        if not ok_cloud:
+            lock_manager.remove_lock(shared)
+            raise RuntimeError(f"Cloud Lock error: {msg_cloud}")
 
     try:
         with host_lock:

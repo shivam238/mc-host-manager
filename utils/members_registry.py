@@ -72,9 +72,13 @@ def load_registry(shared_dir: str | Path) -> dict[str, Any]:
 def save_registry(shared_dir: str | Path, data: dict[str, Any]) -> None:
     p = _members_path(shared_dir)
     p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(p)
+    try:
+        tmp = p.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(p)
+    except Exception:
+        with open(str(p), "w", encoding="utf-8", errors="replace") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
 
 
 def touch_presence(

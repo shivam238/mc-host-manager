@@ -95,10 +95,9 @@ class ServerController:
                     while self.is_running():
                         try:
                             lines = self.get_logs(100)
-                            tmp = console_file.with_suffix(".tmp")
                             import json
-                            tmp.write_text(json.dumps({"logs": lines}, ensure_ascii=False, indent=2), encoding="utf-8")
-                            tmp.replace(console_file)
+                            with open(str(console_file), "w", encoding="utf-8", errors="replace") as f:
+                                json.dump({"logs": lines}, f, ensure_ascii=False, indent=2)
                         except Exception:
                             pass
                         time.sleep(1.5)
