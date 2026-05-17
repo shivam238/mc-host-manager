@@ -1,3 +1,5 @@
+Here’s a cleaned, polished README you can use directly.
+
 # MC Host Manager
 
 Lightweight local Minecraft hosting dashboard with safe backup flow, real-time monitoring, and cross-platform support.
@@ -6,43 +8,31 @@ Lightweight local Minecraft hosting dashboard with safe backup flow, real-time m
 
 # Overview
 
-Open: `http://localhost:7842`
+MC Host Manager is a lightweight local-first Minecraft server hosting dashboard designed for simplicity, safety, and low system overhead.
 
-## Ready-to-use package
+The application provides:
 
-A packaged ready-to-use app is available in `release/` as `mc-host-manager-ready-to-use-*.zip`.
+* Safe server lifecycle management
+* Automatic backup handling
+* Real-time resource monitoring
+* Remote LAN controls with protection
+* Cross-platform support
+* Docker support
+* Lightweight architecture without heavy orchestration layers
 
-Unzip it and run:
+Open dashboard:
 
-```bash
-bash launch.sh
+```text
+http://localhost:7842
 ```
-
-The package already includes the app files, UI assets, and docs.
-
-## Controls From Another Screen/PC
-
-If dashboard is opened from another device, control actions require matching `project_key`.
-
-- Project key is shown in Settings
-- Same key on both screens allows control
-
-## Build
-
-```bash
-bash build.sh
-```
-
-**License:** MIT — see [LICENSE.md](LICENSE.md) for full text.
-
-**Support:** For issues or questions, please open an issue on the project's GitHub repository.
-This reduces corruption risks during shutdowns or crashes.
 
 ---
 
-## Monitoring
+# Features
 
-Real-time resource monitoring:
+## Real-Time Monitoring
+
+Monitor server activity and system resources in real time:
 
 * CPU usage
 * RAM usage
@@ -53,16 +43,35 @@ Real-time resource monitoring:
 
 ## Backup System
 
+Built-in backup management includes:
+
 * Automatic backup creation
 * Backup listing
 * Backup downloads
 * Full server ZIP export
 
+Designed to reduce corruption risks during crashes or unsafe shutdowns.
+
+---
+
+## Lock & Safety System
+
+MC Host Manager uses a lock + heartbeat system to prevent unsafe multi-instance hosting.
+
+### Safety Logic
+
+* Lock acquired before startup
+* Heartbeat maintained while hosting
+* Automatic finalize flow on crash
+* Active lock protection
+* Safe unlock handling
+* Protected force-clear behavior
+
 ---
 
 ## Lightweight Architecture
 
-Designed for low overhead and local hosting.
+Designed for low-overhead local hosting.
 
 ### Included
 
@@ -81,24 +90,14 @@ Designed for low overhead and local hosting.
 
 ---
 
-# Lock & Safety System
-
-The application uses a lock + heartbeat system to prevent unsafe multi-instance hosting.
-
-## Safety Logic
-
-* Lock acquired before startup
-* Heartbeat maintained while hosting
-* Automatic finalize flow on crash
-* Active lock protection
-* Safe unlock handling
-* Protected force-clear behavior
-
----
-
 # Requirements
 
-## Linux / Windows
+## Supported Platforms
+
+* Linux
+* Windows
+
+## Required Software
 
 * Python 3.10+
 * Java installed
@@ -106,9 +105,56 @@ The application uses a lock + heartbeat system to prevent unsafe multi-instance 
 
 ---
 
+# Quick Start
+
+## Ready-to-use Package
+
+Prebuilt packages are available in:
+
+```text
+release/
+```
+
+Example package:
+
+```text
+mc-host-manager-ready-to-use-*.zip
+```
+
+Unzip the package and run:
+
+### Linux
+
+```bash
+bash launch.sh
+```
+
+### Windows
+
+```bat
+launch.bat
+```
+
+Then open:
+
+```text
+http://localhost:7842
+```
+
+The packaged build already includes:
+
+* Application files
+* UI assets
+* Runtime configuration
+* Documentation
+
+---
+
 # Installation
 
 ## Install from PyPI (Beta)
+
+Latest beta:
 
 ```bash
 pip install --pre mc-host-manager
@@ -124,47 +170,13 @@ pip install mc-host-manager==1.0.0b1
 
 # Run From Source
 
-Linux:
+## Linux
 
 ```bash
 bash launch.sh
 ```
 
-<<<<<<< HEAD
-=======
-Open: `http://localhost:7842`
-
-## Ready-to-use package
-
-A packaged ready-to-use app is available in `release/` as `mc-host-manager-ready-to-use-*.zip`.
-
-Unzip it and run:
-
-```bash
-bash launch.sh
-```
-
-The package already includes the app files, UI assets, and docs.
-
-## Controls From Another Screen/PC
-
-**License:** MIT — see [LICENSE.md](LICENSE.md) for full text.
-
-**Support:** For issues or questions, please open an issue on the project's GitHub repository.
-
-If dashboard is opened from another device, control actions require matching `project_key`.
-
-- Project key is shown in Settings
-- Same key on both screens allows control
-
-## Build
-
-```bash
-bash build.sh
-```
-
->>>>>>> 7276cd4 (docs: update README and SETUP quick-start; add requirements.txt)
-Windows:
+## Windows
 
 ```bat
 launch.bat
@@ -180,13 +192,13 @@ http://localhost:7842
 
 # Docker
 
-Pull image:
+## Pull Image
 
 ```bash
 docker pull ghcr.io/shivam238/mc-host-manager:v1.0.0b1
 ```
 
-Run container:
+## Run Container
 
 ```bash
 docker run -p 7842:7842 ghcr.io/shivam238/mc-host-manager:v1.0.0b1
@@ -194,52 +206,32 @@ docker run -p 7842:7842 ghcr.io/shivam238/mc-host-manager:v1.0.0b1
 
 ---
 
-# Ready-to-use Package
-
-Prebuilt packages are available in:
-
-```text
-release/
-```
-
-Example:
-
-```text
-mc-host-manager-ready-to-use-*.zip
-```
-
-The packaged build already includes:
-
-* Application files
-* UI assets
-* Runtime configuration
-* Documentation
-
-Run packaged version:
-
-Linux:
-
-```bash
-bash launch.sh
-```
-
-Windows:
-
-```bat
-launch.bat
-```
-
----
-
 # Remote Controls (LAN)
 
-When opened from another device, control actions require a matching `project_key`.
+When the dashboard is opened from another device, control actions require a matching `project_key`.
 
 ## Security
 
 * Project key shown in Settings
 * Matching key required for remote control
 * Prevents unauthorized actions from other devices
+
+> This project is designed primarily for trusted local/LAN environments.
+
+---
+
+# Minecraft Compatibility
+
+Compatible with most standard Minecraft server types, including:
+
+* Vanilla
+* Paper
+* Spigot
+* Purpur
+* Fabric
+* Forge
+
+Compatibility may vary depending on custom launch configurations or modpacks.
 
 ---
 
@@ -262,7 +254,7 @@ build.bat
 # Project Structure
 
 ```text
-MC_HOSTER/
+MC_HOST_MANAGER/
 ├── ui/
 ├── release/
 ├── backups/
@@ -306,20 +298,28 @@ Planned improvements:
 
 # Repository
 
-GitHub Repository:
+## GitHub Repository
 
-[mc-host-manager GitHub Repository](https://github.com/shivam238/mc-host-manager?utm_source=chatgpt.com)
+[https://github.com/shivam238/mc-host-manager](https://github.com/shivam238/mc-host-manager)
 
-PyPI Package:
+## PyPI Package
 
-[mc-host-manager on PyPI](https://pypi.org/project/mc-host-manager/?utm_source=chatgpt.com)
+[https://pypi.org/project/mc-host-manager/](https://pypi.org/project/mc-host-manager/)
 
-GitHub Container Package:
+## GitHub Container Registry
 
-[GitHub Container Registry Package](https://github.com/shivam238/mc-host-manager/pkgs/container/mc-host-manager?utm_source=chatgpt.com)
+[https://github.com/shivam238/mc-host-manager/pkgs/container/mc-host-manager](https://github.com/shivam238/mc-host-manager/pkgs/container/mc-host-manager)
 
 ---
 
 # License
 
-This project is released under the project license included in the repository.
+MIT License
+
+See `LICENSE.md` for full license text.
+
+---
+
+# Support
+
+For issues, bug reports, or feature requests, please open an issue on the GitHub repository.
