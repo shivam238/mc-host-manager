@@ -71,7 +71,7 @@ class ServerController:
             self.proc = subprocess.Popen(
                 cmd, cwd=str(server_path),
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, bufsize=1
+                encoding="utf-8", errors="replace", bufsize=1
             )
             
             proc = self.proc
@@ -96,8 +96,14 @@ class ServerController:
                         try:
                             lines = self.get_logs(100)
                             import json
-                            with open(str(console_file), "w", encoding="utf-8", errors="replace") as f:
-                                json.dump({"logs": lines}, f, ensure_ascii=False, indent=2)
+                            # Retry loop to handle Windows file lock contention with Syncthing
+                            for attempt in range(5):
+                                try:
+                                    with open(str(console_file), "w", encoding="utf-8", errors="replace") as f:
+                                        json.dump({"logs": lines}, f, ensure_ascii=False, indent=2)
+                                    break
+                                except PermissionError:
+                                    time.sleep(0.1)
                         except Exception:
                             pass
                         time.sleep(1.5)

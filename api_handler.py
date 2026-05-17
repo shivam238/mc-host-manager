@@ -495,12 +495,10 @@ class APIHandler(BaseHTTPRequestHandler):
                 console_file = Path(shared) / ".remote_console.json"
                 if console_file.is_file():
                     try:
-                        mtime = console_file.stat().st_mtime
-                        if (time.time() - mtime) < 600:  # 10 minutes tolerance for clock skews & Syncthing sync latency
-                            data = json.loads(console_file.read_text(encoding="utf-8", errors="replace"))
-                            if isinstance(data, dict) and "logs" in data:
-                                self._json(data)
-                                return
+                        data = json.loads(console_file.read_text(encoding="utf-8", errors="replace"))
+                        if isinstance(data, dict) and "logs" in data:
+                            self._json(data)
+                            return
                     except Exception:
                         pass
 
