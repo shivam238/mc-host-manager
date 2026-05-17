@@ -53,11 +53,12 @@ chmod +x launch.sh
 ```bash id="a4my1s"
 bash launch.sh
 ```
+Open the dashboard in your browser at `http://localhost:7842`.
 
-Open dashboard:
+Optional: install Python dependencies (recommended):
 
-```text id="s57gcv"
-http://localhost:7842
+```bash
+python3 -m pip install -r requirements.txt
 ```
 
 ---

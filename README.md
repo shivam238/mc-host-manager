@@ -6,40 +6,36 @@ Lightweight local Minecraft hosting dashboard with safe backup flow, real-time m
 
 # Overview
 
-MC Host Manager is a lightweight local-first Minecraft server management system designed for stability, safety, and minimal overhead.
+Open: `http://localhost:7842`
 
-It provides:
+## Ready-to-use package
 
-* Safe server lifecycle management
-* Automatic backup handling
-* Real-time system monitoring
-* Lightweight web dashboard
-* Cross-platform launch/build support
-* Local network remote controls
+A packaged ready-to-use app is available in `release/` as `mc-host-manager-ready-to-use-*.zip`.
 
-The project intentionally avoids heavy orchestration layers and large hosting panel stacks to remain fast and reliable for self-hosted environments.
+Unzip it and run:
 
----
+```bash
+bash launch.sh
+```
 
-# Features
+The package already includes the app files, UI assets, and docs.
 
-## Server Management
+## Controls From Another Screen/PC
 
-* Start / Stop / Restart Minecraft servers
-* Live server status monitoring
-* Console log streaming
-* Lightweight process management
+If dashboard is opened from another device, control actions require matching `project_key`.
 
-## Safe Stop Flow
+- Project key is shown in Settings
+- Same key on both screens allows control
 
-MC Host Manager performs a protected shutdown sequence:
+## Build
 
-1. Save world state
-2. Stop server safely
-3. Create backup
-4. Sync world files
-5. Release active lock
+```bash
+bash build.sh
+```
 
+**License:** MIT — see [LICENSE.md](LICENSE.md) for full text.
+
+**Support:** For issues or questions, please open an issue on the project's GitHub repository.
 This reduces corruption risks during shutdowns or crashes.
 
 ---
@@ -134,6 +130,40 @@ Linux:
 bash launch.sh
 ```
 
+<<<<<<< HEAD
+=======
+Open: `http://localhost:7842`
+
+## Ready-to-use package
+
+A packaged ready-to-use app is available in `release/` as `mc-host-manager-ready-to-use-*.zip`.
+
+Unzip it and run:
+
+```bash
+bash launch.sh
+```
+
+The package already includes the app files, UI assets, and docs.
+
+## Controls From Another Screen/PC
+
+**License:** MIT — see [LICENSE.md](LICENSE.md) for full text.
+
+**Support:** For issues or questions, please open an issue on the project's GitHub repository.
+
+If dashboard is opened from another device, control actions require matching `project_key`.
+
+- Project key is shown in Settings
+- Same key on both screens allows control
+
+## Build
+
+```bash
+bash build.sh
+```
+
+>>>>>>> 7276cd4 (docs: update README and SETUP quick-start; add requirements.txt)
 Windows:
 
 ```bat
