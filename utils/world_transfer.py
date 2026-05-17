@@ -38,10 +38,17 @@ def build_world_zip(server_dir: str | Path) -> tuple[bool, str, bytes]:
     if not root.is_dir():
         return False, "Server folder not found.", b""
 
+    from utils.backup_manager import get_world_dirs
+    world_dirs = get_world_dirs(root)
+    names_to_pack = list(world_dirs)
+    for name in INCLUDE_NAMES:
+        if name != "world" and name not in names_to_pack:
+            names_to_pack.append(name)
+
     buf = io.BytesIO()
     count = 0
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
-        for name in INCLUDE_NAMES:
+        for name in names_to_pack:
             p = root / name
             if p.is_file():
                 zf.write(p, p.name)
@@ -66,6 +73,33 @@ def build_world_zip(server_dir: str | Path) -> tuple[bool, str, bytes]:
     return True, f"Packed {count} file(s).", buf.getvalue()
 
 
+def safe_rmtree(path: Path) -> None:
+    import os
+    import stat
+    import time
+    import shutil
+    
+    def handle_remove_readonly(func, path_str, exc_info):
+        try:
+            os.chmod(path_str, stat.S_IWRITE)
+            func(path_str)
+        except Exception:
+            pass
+
+    for attempt in range(5):
+        try:
+            if path.exists():
+                shutil.rmtree(str(path), onerror=handle_remove_readonly)
+            return
+        except Exception:
+            time.sleep(0.15)
+    # Final try to let standard shutil do it
+    if path.exists():
+        try:
+            shutil.rmtree(str(path), ignore_errors=True)
+        except Exception:
+            pass
+
 def apply_world_zip(server_dir: str | Path, data: bytes) -> tuple[bool, str]:
     root = Path(server_dir).expanduser()
     if not root.is_dir():
@@ -84,7 +118,7 @@ def apply_world_zip(server_dir: str | Path, data: bytes) -> tuple[bool, str]:
             dest = root / item.name
             if item.is_dir():
                 if dest.exists():
-                    shutil.rmtree(dest, ignore_errors=True)
+                    safe_rmtree(dest)
                 shutil.copytree(item, dest)
             else:
                 shutil.copy2(item, dest)

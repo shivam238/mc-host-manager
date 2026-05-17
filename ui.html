@@ -134,8 +134,7 @@
             <label class="lbl">Host PC ka IP</label>
             <input id="lan-host-ip" class="inp" placeholder="e.g. 192.168.0.10" />
             <p class="small">Host server STOP hona chahiye. Pehle same Server ID se join karo.</p>
-            <button type="button" class="btn-wizard" style="margin-top:8px;" onclick="pullWorldLan()">📥 Host se world download</button>
-            <button type="button" class="btn-ghost" style="margin-top:6px;width:100%;" onclick="pullWorldAuto()">🔄 Auto sync world</button>
+            <button type="button" class="btn-wizard" style="margin-top:8px;width:100%;" onclick="pullWorldLan()">📥 Host se world download</button>
           </div>
 
           <div id="members-summary" class="small" style="margin-top:12px;">—</div>
@@ -149,6 +148,7 @@
           <div class="row"><label>Server folder</label>
             <div style="display:flex;gap:6px;">
               <input id="f-server" style="flex:1;" />
+              <button type="button" onclick="browseServerFolder()">Browse</button>
               <button type="button" onclick="detectServer()">Detect</button>
             </div>
           </div>

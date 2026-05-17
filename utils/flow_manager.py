@@ -172,7 +172,15 @@ def finalize_stop_flow(cfg: dict[str, Any], cb, reason: str = "normal") -> None:
         sid = cfg.get("server_id", "")
         if fb_url and sid:
             from utils import matchmaker
-            matchmaker.touch_presence(fb_url, sid, get_node_id(), hosting=False)
+            import socket
+            hname = socket.gethostname().lower().split('.')[0]
+            matchmaker.update_presence(fb_url, sid, hname, {
+                "node_id": get_node_id(),
+                "user": load_user(),
+                "hostname": socket.gethostname(),
+                "ip": get_local_ip(),
+                "hosting": False
+            })
     except Exception:
         pass
 

@@ -47,6 +47,55 @@ try:
 except ImportError:
     requests = None
 
+def browse_directory_native() -> str | None:
+    import platform
+    import subprocess
+    
+    system = platform.system()
+    if system == "Windows":
+        ps_code = (
+            "[void][System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms'); "
+            "$dialog = New-Object System.Windows.Forms.FolderBrowserDialog; "
+            "$dialog.Description = 'Select Minecraft Server Folder'; "
+            "$dialog.ShowNewFolderButton = $true; "
+            "if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $dialog.SelectedPath }"
+        )
+        try:
+            cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_code]
+            out = subprocess.check_output(cmd, text=True).strip()
+            return out if out else None
+        except Exception:
+            pass
+            
+    elif system == "Linux":
+        # Try Zenity
+        try:
+            out = subprocess.check_output(["zenity", "--file-selection", "--directory", "--title=Select Minecraft Server Folder"], text=True).strip()
+            return out if out else None
+        except Exception:
+            pass
+        # Try KDialog
+        try:
+            out = subprocess.check_output(["kdialog", "--getexistingdirectory", "--title", "Select Minecraft Server Folder"], text=True).strip()
+            return out if out else None
+        except Exception:
+            pass
+            
+    # Tkinter Fallback
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        folder = filedialog.askdirectory(title="Select Minecraft Server Folder")
+        root.destroy()
+        return folder if folder else None
+    except Exception:
+        pass
+        
+    return None
+
 def read_json(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
     length = int(handler.headers.get("Content-Length", 0) or 0)
     if length <= 0:
@@ -505,6 +554,9 @@ class APIHandler(BaseHTTPRequestHandler):
             if not ip:
                 self._json({"logs": ["Error: Missing IP for remote logs"]})
                 return
+            if requests is None:
+                self._json({"logs": ["Error: python-requests library is missing. Cannot proxy remote logs."]})
+                return
             try:
                 # Proxy the request to the remote manager over LAN as a fallback
                 r = requests.get(f"http://{ip}:7842/logs", timeout=2.0)
@@ -770,6 +822,14 @@ class APIHandler(BaseHTTPRequestHandler):
 
             ok = run_task("switch-host", _switch_task)
             self._json({"ok": ok, "msg": "Switch host started..." if ok else "Busy."})
+            return
+
+        if self.path == "/config/browse_folder":
+            p = browse_directory_native()
+            if p:
+                self._json({"ok": True, "path": p})
+            else:
+                self._json({"ok": False, "msg": "No folder selected or cancelled."})
             return
 
         if self.path == "/config/save":

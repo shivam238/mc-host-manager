@@ -457,6 +457,21 @@ function renderMembers(d) {
   if (autoWorldEl) autoWorldEl.checked = d.auto_world_before_start !== false;
 }
 
+async function browseServerFolder() {
+  try {
+    toast('Opening folder chooser...', false);
+    const d = await post('/config/browse_folder', {});
+    if (d.ok && d.path) {
+      document.getElementById('f-server').value = d.path;
+      toast('Server folder updated!', false);
+    } else if (d.msg) {
+      toast(d.msg, true);
+    }
+  } catch (e) {
+    toast('Failed to open folder chooser.', true);
+  }
+}
+
 async function detectServer() {
   const hint = document.getElementById('detect-hint');
   if (!hint) return;

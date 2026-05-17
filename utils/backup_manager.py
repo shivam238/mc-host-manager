@@ -4,7 +4,31 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional, Callable, List, Dict, Any
 
-WORLD_DIRS = ["world", "world_nether", "world_the_end"]
+def get_world_dirs(server_dir: Path) -> List[str]:
+    """Dynamically detect world directory names from server.properties."""
+    level_name = "world"
+    prop_path = server_dir / "server.properties"
+    if prop_path.exists():
+        try:
+            for line in prop_path.read_text(encoding="utf-8", errors="replace").splitlines():
+                if "=" in line and not line.strip().startswith("#"):
+                    k, v = line.split("=", 1)
+                    if k.strip() == "level-name":
+                        level_name = v.strip()
+                        break
+        except Exception:
+            pass
+            
+    dirs = [level_name]
+    # Handle Spigot/Paper style nether/end directories
+    for suffix in ("_nether", "_the_end"):
+        dirs.append(level_name + suffix)
+    # Standard fallback support
+    for fallback in ("world", "world_nether", "world_the_end"):
+        if fallback not in dirs:
+            dirs.append(fallback)
+            
+    return dirs
 
 def create_timestamped_backup(
     server_dir: str | Path, 
@@ -21,7 +45,8 @@ def create_timestamped_backup(
     target_zip = backup_path / zip_name
     
     files_to_zip: List[Path] = []
-    for d in WORLD_DIRS:
+    world_dirs = get_world_dirs(server_path)
+    for d in world_dirs:
         src = server_path / d
         if src.exists():
             files_to_zip.extend(list(src.rglob("*")))
@@ -74,6 +99,29 @@ def list_backups(backup_dir: str | Path) -> List[Dict[str, Any]]:
         })
     return results
 
+def safe_rmtree(path: Path) -> None:
+    import os
+    import stat
+    import time
+    
+    def handle_remove_readonly(func, path_str, exc_info):
+        try:
+            os.chmod(path_str, stat.S_IWRITE)
+            func(path_str)
+        except Exception:
+            pass
+
+    for attempt in range(5):
+        try:
+            if path.exists():
+                shutil.rmtree(str(path), onerror=handle_remove_readonly)
+            return
+        except Exception:
+            time.sleep(0.15)
+    # Final try to let standard shutil do it or raise exception if completely locked
+    if path.exists():
+        shutil.rmtree(str(path))
+
 def copy_world(
     src_dir: str | Path, 
     dst_dir: str | Path, 
@@ -82,16 +130,17 @@ def copy_world(
     src_path = Path(src_dir)
     dst_path = Path(dst_dir)
     
-    for i, d in enumerate(WORLD_DIRS):
+    world_dirs = get_world_dirs(src_path)
+    for i, d in enumerate(world_dirs):
         s = src_path / d
         t = dst_path / d
         if s.exists():
             if t.exists(): 
-                shutil.rmtree(t)
+                safe_rmtree(t)
             shutil.copytree(s, t)
         cb = progress_cb
         if cb is not None:
-            cb(int((i + 1) / len(WORLD_DIRS) * 100), f"Syncing {d}...")
+            cb(int((i + 1) / len(world_dirs) * 100), f"Syncing {d}...")
 
 def restore_backup(
     backup_zip: str | Path,
@@ -105,18 +154,20 @@ def restore_backup(
     try:
         cb = progress_cb if progress_cb is not None else (lambda *_: None)
         cb(10, "Reading backup archive...")
+        world_dirs = get_world_dirs(server_path)
         with zipfile.ZipFile(zip_path, "r") as zf:
             members = zf.namelist()
-            world_members = [m for m in members if any(m.startswith(w + "/") for w in WORLD_DIRS)]
+            world_members = [m for m in members if any(m.startswith(w + "/") for w in world_dirs)]
             if not world_members:
                 return False
-            for w in WORLD_DIRS:
+            for w in world_dirs:
                 target = server_path / w
                 if target.exists():
-                    shutil.rmtree(target)
+                    safe_rmtree(target)
             cb(40, "Extracting backup...")
             zf.extractall(server_path, members=world_members)
         cb(100, "Backup restored.")
         return True
     except Exception:
         return False
+
