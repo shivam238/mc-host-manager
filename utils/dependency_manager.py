@@ -233,7 +233,11 @@ def _extract_archive(archive: Path, dest: Path) -> None:
             zf.extractall(dest)
         return
     with tarfile.open(archive, "r:*") as tf:
-        tf.extractall(dest, filter="data")
+        try:
+            # filter="data" was added in Python 3.12; graceful fallback for older versions
+            tf.extractall(dest, filter="data")
+        except TypeError:
+            tf.extractall(dest)
 
 
 def install_syncthing(*, force: bool = False) -> tuple[bool, str]:
@@ -407,6 +411,7 @@ def start_syncthing(*, wait_seconds: float = 60.0) -> tuple[bool, str]:
     while time.time() < deadline:
         if syncthing_api_ready():
             _save_state({"syncthing_running": True, "last_error": ""})
+            log_fh.close()
             try:
                 from utils.flow_manager import st_api
 

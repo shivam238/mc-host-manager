@@ -201,7 +201,7 @@ def release_lock(firebase_url: str, server_id: str, node_id: str) -> None:
 
 def get_lock_data(fb_url, server_id):
     """Retrieve the current lock data from Firebase."""
-    if not fb_url or not server_id: return False, "Missing URL/SID", None
+    if not fb_url or not server_id or requests is None: return False, "Missing URL/SID", None
     try:
         url = f"{_get_base_url(fb_url)}/locks/{server_id.upper()}.json"
         # Disable cache
@@ -215,7 +215,7 @@ def get_lock_data(fb_url, server_id):
 
 def send_signal(fb_url, server_id, cmd, target_node=None, sender_node=None):
     """Send a command signal to a specific node or the whole group."""
-    if not fb_url or not server_id: return False
+    if not fb_url or not server_id or requests is None: return False
     try:
         url = f"{_get_base_url(fb_url)}/servers/{server_id.upper()}/signal.json"
         payload = {"cmd": cmd, "t": int(time.time())}
@@ -228,7 +228,7 @@ def send_signal(fb_url, server_id, cmd, target_node=None, sender_node=None):
 
 def check_signal(fb_url, server_id):
     """Check if there is a pending signal for us."""
-    if not fb_url or not server_id: return None
+    if not fb_url or not server_id or requests is None: return None
     try:
         url = f"{_get_base_url(fb_url)}/servers/{server_id.upper()}/signal.json"
         # Disable cache with timestamp
@@ -242,7 +242,7 @@ def check_signal(fb_url, server_id):
 
 def clear_signal(fb_url, server_id):
     """Clear the signal after processing."""
-    if not fb_url or not server_id: return
+    if not fb_url or not server_id or requests is None: return
     try:
         url = f"{_get_base_url(fb_url)}/servers/{server_id.upper()}/signal.json"
         requests.delete(url, timeout=3)

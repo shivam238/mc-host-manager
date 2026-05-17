@@ -255,9 +255,9 @@ function applyStatus(d) {
   // If we are the host, use our own local IP
   if (d.running) state.hostIp = d.local_ip || '';
 
-  document.title = (d.project_name || 'Minecraft Server') + ' - Host Manager';
+  document.title = 'MC HOSTER';
   var titleEl = document.getElementById('title');
-  if (titleEl) titleEl.textContent = d.project_name || 'Minecraft Server';
+  if (titleEl) titleEl.textContent = 'MC HOSTER';
 
   var badge = document.getElementById('badge');
   if (badge) {

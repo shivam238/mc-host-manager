@@ -168,7 +168,7 @@ class ServerController:
         pid = self.get_pid()
         if pid is None:
             return None
-        # Linux /proc path
+        # Linux /proc path (fast, no dependency)
         try:
             with open(f"/proc/{pid}/status", "r", encoding="utf-8") as f:
                 for line in f:
@@ -177,7 +177,13 @@ class ServerController:
                         return round(kb / 1024, 1)
         except Exception:
             pass
-        return None
+        # Windows / macOS fallback via psutil (already a soft dep for CPU metrics)
+        try:
+            import psutil
+            proc = psutil.Process(pid)
+            return round(proc.memory_info().rss / (1024 * 1024), 1)
+        except Exception:
+            return None
 
     def get_online_players(self):
         with self.state_lock:

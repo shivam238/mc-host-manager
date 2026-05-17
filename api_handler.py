@@ -174,16 +174,19 @@ def get_status(cfg: dict[str, Any]) -> dict[str, Any]:
         fb_url = cfg.get("firebase_url", "")
         if fb_url and server_id:
             from utils import matchmaker
-            # We use a short cache for the global lock
-            ok_l, msg_l, l_data = cache_get(f"fb_lock_data:{server_id}", 2.5, lambda: (True, "", matchmaker.requests.get(f"{matchmaker._get_base_url(fb_url)}/locks/{server_id.upper()}.json").json()))
-            if l_data and isinstance(l_data, dict):
+            # Use the safe get_lock_data() wrapper — handles requests=None and network errors
+            ok_l, msg_l, l_data = cache_get(
+                f"fb_lock_data:{server_id}", 2.5,
+                lambda: matchmaker.get_lock_data(fb_url, server_id)
+            )
+            if ok_l and l_data and isinstance(l_data, dict):
                 now = int(time.time())
                 ls = l_data.get("t", 0)
                 if (now - ls) < 45: # Lock is active
                     import socket
                     my_host = socket.gethostname().lower().split('.')[0]
                     rem_host = str(l_data.get("hostname") or l_data.get("user") or "").lower().split('.')[0]
-                    
+
                     if l_data.get("node_id") != get_node_id() and rem_host != my_host:
                         # Override remote_lock with Firebase data for instant global block
                         remote_lock = {
@@ -1061,7 +1064,7 @@ class APIHandler(BaseHTTPRequestHandler):
                 return
             if not mc_server.is_running():
                 # Try to proxy command to remote host
-                remote_lock, _, _ = poll_remote_hosting(cfg, st_api.list_peers())
+                remote_lock = poll_remote_hosting(cfg, members=st_api.list_peers())
                 remote_ip = remote_lock.get("peer_ip") if remote_lock else ""
                 
                 success = False
