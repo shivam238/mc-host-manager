@@ -1,6 +1,36 @@
+Yes, this is valid MIT license text and completely fine to use.
+
+I’d only recommend one small improvement:
+
+Instead of:
+
+```text id="7kv4zh"
+Copyright (c) 2026 MC Host Manager Contributors
+```
+
+use either:
+
+```text id="m8j4uq"
+Copyright (c) 2026 Shivam and MC Host Manager Contributors
+```
+
+or:
+
+```text id="83n4i7"
+Copyright (c) 2026 Shivam238
+```
+
+because:
+
+* “Contributors” alone can feel vague legally
+* having an identifiable owner/project maintainer is cleaner
+* GitHub projects commonly use maintainer name + contributors
+
+Best option for open-source projects is usually:
+
 MIT License
 
-Copyright (c) 2026 MC Host Manager Contributors 
+Copyright (c) 2026 Shivam238 and MC Host Manager Contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
