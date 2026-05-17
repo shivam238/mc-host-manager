@@ -1,4 +1,4 @@
-README ke saath ye `SETUP.md` bhi useful rahega for first-time users:
+Here’s a cleaned and polished final version of `SETUP.md`.
 
 # MC Host Manager — Setup Guide
 
@@ -8,7 +8,7 @@ Complete setup instructions for Linux and Windows.
 
 # Requirements
 
-Before running MC Host Manager, install the following:
+Before running MC Host Manager, install the following dependencies.
 
 ## Required
 
@@ -18,15 +18,22 @@ Before running MC Host Manager, install the following:
 
 ---
 
+# Recommended Java Versions
+
+* Java 17 → Minecraft 1.18+
+* Java 21 → newer server builds
+
+---
+
 # Linux Setup
 
 ## 1. Clone Repository
 
-```bash id="j5m3zy"
+```bash
 git clone https://github.com/shivam238/mc-host-manager.git
 ```
 
-```bash id="m9g2dv"
+```bash
 cd mc-host-manager
 ```
 
@@ -34,31 +41,36 @@ cd mc-host-manager
 
 ## 2. Install Python Dependencies
 
-```bash id="s4g9nu"
-pip install -r requirements.txt
+```bash
+python3 -m pip install -r requirements.txt
 ```
 
 ---
 
 ## 3. Make Launch Script Executable
 
-```bash id="r4ztzw"
+```bash
 chmod +x launch.sh
+```
+
+Optional:
+
+```bash
+chmod +x build.sh
 ```
 
 ---
 
 ## 4. Start Application
 
-```bash id="a4my1s"
+```bash
 bash launch.sh
 ```
-Open the dashboard in your browser at `http://localhost:7842`.
 
-Optional: install Python dependencies (recommended):
+Open the dashboard in your browser:
 
-```bash
-python3 -m pip install -r requirements.txt
+```text
+http://localhost:7842
 ```
 
 ---
@@ -78,7 +90,7 @@ Either:
 
 Open terminal inside project folder:
 
-```bat id="jlwmie"
+```bat
 pip install -r requirements.txt
 ```
 
@@ -86,21 +98,17 @@ pip install -r requirements.txt
 
 ## 3. Start Application
 
-Double click:
+Run:
 
-```text id="b0vvwb"
+```bat
 launch.bat
 ```
 
-OR run:
-
-```bat id="4x8o16"
-launch.bat
-```
+You can also double-click `launch.bat` from File Explorer.
 
 Open dashboard:
 
-```text id="v9spuj"
+```text
 http://localhost:7842
 ```
 
@@ -108,15 +116,15 @@ http://localhost:7842
 
 # Using Ready-to-use Package
 
-Prebuilt package location:
+Prebuilt packages are available in:
 
-```text id="snr2iy"
+```text
 release/
 ```
 
-Example:
+Example package:
 
-```text id="wrffsw"
+```text
 mc-host-manager-ready-to-use-*.zip
 ```
 
@@ -129,19 +137,25 @@ mc-host-manager-ready-to-use-*.zip
    * `launch.sh` on Linux
    * `launch.bat` on Windows
 
+Open dashboard:
+
+```text
+http://localhost:7842
+```
+
 ---
 
 # PyPI Installation
 
 Install latest beta release:
 
-```bash id="zmh4lh"
+```bash
 pip install --pre mc-host-manager
 ```
 
 Specific version:
 
-```bash id="y74jcu"
+```bash
 pip install mc-host-manager==1.0.0b1
 ```
 
@@ -151,7 +165,7 @@ pip install mc-host-manager==1.0.0b1
 
 ## Pull Image
 
-```bash id="lmq5l7"
+```bash
 docker pull ghcr.io/shivam238/mc-host-manager:v1.0.0b1
 ```
 
@@ -159,13 +173,13 @@ docker pull ghcr.io/shivam238/mc-host-manager:v1.0.0b1
 
 ## Run Container
 
-```bash id="1pkx9l"
+```bash
 docker run -p 7842:7842 ghcr.io/shivam238/mc-host-manager:v1.0.0b1
 ```
 
 Open dashboard:
 
-```text id="qqn7zq"
+```text
 http://localhost:7842
 ```
 
@@ -177,7 +191,7 @@ Place your Minecraft server files inside your configured server directory.
 
 Example files:
 
-```text id="uxpqav"
+```text
 server.jar
 eula.txt
 server.properties
@@ -199,12 +213,19 @@ On first startup:
 
 # Remote Controls (LAN)
 
-To control server from another device:
+To control the server from another device:
 
 1. Open dashboard on host machine
 2. Open Settings
 3. Copy `project_key`
-4. Use same key on remote device
+4. Use the same key on remote device
+
+## Firewall Note
+
+If remote devices cannot access the dashboard:
+
+* Allow port `7842` through firewall
+* Ensure both devices are on the same LAN
 
 ---
 
@@ -212,13 +233,13 @@ To control server from another device:
 
 ## Linux
 
-```bash id="cc9t54"
+```bash
 bash build.sh
 ```
 
 ## Windows
 
-```bat id="8go8y4"
+```bat
 build.bat
 ```
 
@@ -228,18 +249,18 @@ build.bat
 
 ## Port Already In Use
 
-If port `7842` is busy:
+If port `7842` is already occupied:
 
-* Stop conflicting application
-* OR change configured port
+* Stop the conflicting application
+* OR change the configured port
 
 ---
 
 ## Permission Issues (Linux)
 
-If scripts fail:
+If scripts fail to execute:
 
-```bash id="lyjlwm"
+```bash
 chmod +x launch.sh
 chmod +x build.sh
 ```
@@ -250,7 +271,7 @@ chmod +x build.sh
 
 Add user to docker group:
 
-```bash id="68kvkr"
+```bash
 sudo usermod -aG docker $USER
 ```
 
@@ -262,24 +283,36 @@ Then logout/login again.
 
 Pull latest changes:
 
-```bash id="jlwmhf"
+```bash
 git pull
 ```
 
-Reinstall dependencies if needed:
+Reinstall dependencies if required:
 
-```bash id="z4f1kt"
-pip install -r requirements.txt
+```bash
+python3 -m pip install -r requirements.txt
 ```
 
 ---
 
 # Repository
 
-GitHub:
+## GitHub
 
-[mc-host-manager Repository](https://github.com/shivam238/mc-host-manager?utm_source=chatgpt.com)
+[https://github.com/shivam238/mc-host-manager](https://github.com/shivam238/mc-host-manager)
 
-PyPI:
+## PyPI
 
-[mc-host-manager on PyPI](https://pypi.org/project/mc-host-manager/?utm_source=chatgpt.com)
+[https://pypi.org/project/mc-host-manager/](https://pypi.org/project/mc-host-manager/)
+
+## GitHub Container Registry
+
+[https://github.com/shivam238/mc-host-manager/pkgs/container/mc-host-manager](https://github.com/shivam238/mc-host-manager/pkgs/container/mc-host-manager)
+
+---
+
+# License
+
+MIT License
+
+See `LICENSE.md` for full license text.
