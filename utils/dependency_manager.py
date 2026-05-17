@@ -142,11 +142,46 @@ def bundled_java_binary() -> Path | None:
     return None
 
 
+def _java_major(binary: str | Path) -> int | None:
+    try:
+        r = subprocess.run(
+            [str(binary), "-version"],
+            capture_output=True,
+            text=True,
+            timeout=12,
+            check=False,
+        )
+        out = (r.stderr or "") + (r.stdout or "")
+        import re
+
+        m = re.search(r'version "(\d+)(?:[._](\d+))?', out)
+        if not m:
+            return None
+        major = int(m.group(1))
+        if major == 1 and m.group(2):
+            return int(m.group(2))
+        return major
+    except Exception:
+        return None
+
+
 def resolve_java_binary() -> str | None:
+    candidates: list[str] = []
     bundled = bundled_java_binary()
     if bundled:
-        return str(bundled)
-    return shutil.which("java")
+        candidates.append(str(bundled))
+    system_java = shutil.which("java")
+    if system_java:
+        candidates.append(system_java)
+    if not candidates:
+        return None
+
+    req = get_required_java_version()
+    for java in candidates:
+        major = _java_major(java)
+        if major is not None and major >= req:
+            return java
+    return candidates[0]
 
 
 def _port_open(port: int) -> bool:
@@ -265,37 +300,135 @@ def install_syncthing(*, force: bool = False) -> tuple[bool, str]:
         return False, f"Syncthing install failed: {e}"
 
 
+def get_required_java_version() -> int:
+    """Detect required Java version from server.properties or server.jar (including nested JARs)."""
+    req = 21
+    try:
+        from utils.config import load_config
+        cfg = load_config()
+        server_dir = cfg.get("server_dir", "")
+        server_jar = cfg.get("server_jar", "server.jar")
+        if not server_dir:
+            return 21
+
+        from pathlib import Path
+        jar_path = Path(server_dir) / server_jar
+        if not jar_path.exists() or not jar_path.is_file():
+            return 21
+
+        import zipfile
+        import struct
+        import io
+
+        max_major = 0
+
+        def scan_zip(zf: zipfile.ZipFile):
+            nonlocal max_major
+            for name in zf.namelist():
+                if name.endswith(".class"):
+                    try:
+                        with zf.open(name) as f:
+                            header = f.read(8)
+                        if len(header) == 8 and header[:4] == b"\xca\xfe\xba\xbe":
+                            major = struct.unpack(">H", header[6:8])[0]
+                            if major > max_major:
+                                max_major = major
+                    except Exception:
+                        pass
+                elif name.endswith(".jar"):
+                    try:
+                        nested_data = zf.read(name)
+                        with zipfile.ZipFile(io.BytesIO(nested_data)) as nzf:
+                            scan_zip(nzf)
+                    except Exception:
+                        pass
+
+        with zipfile.ZipFile(jar_path, "r") as zf:
+            scan_zip(zf)
+
+        if max_major >= 45:
+            req_detected = max_major - 44
+            if 8 <= req_detected <= 30:
+                req = req_detected
+    except Exception:
+        pass
+    return req
+
+
 def _java_download_url() -> str:
+    req_version = get_required_java_version()
     os_name, arch = _platform_tuple()
     os_map = {"linux": "linux", "windows": "windows", "darwin": "mac"}
     arch_map = {"amd64": "x64", "arm64": "aarch64", "386": "x86"}
     return (
         "https://api.adoptium.net/v3/binary/latest/"
-        f"{JAVA_MAJOR}/ga/{os_map[os_name]}/{arch_map.get(arch, 'x64')}/jre/hotspot/normal/eclipse"
+        f"{req_version}/ga/{os_map[os_name]}/{arch_map.get(arch, 'x64')}/jre/hotspot/normal/eclipse"
     )
 
 
 def install_java(*, force: bool = False) -> tuple[bool, str]:
+    req_version = get_required_java_version()
     if not force and bundled_java_binary():
-        return True, "Java already installed (bundled)."
-    url = _java_download_url()
-    os_name, _ = _platform_tuple()
+        if is_java_usable():
+            return True, "Java already installed (bundled)."
+
+    os_name, arch = _platform_tuple()
+    os_map = {"linux": "linux", "windows": "windows", "darwin": "mac"}
+    arch_map = {"amd64": "x64", "arm64": "aarch64", "386": "x86"}
     ext = ".zip" if os_name == "windows" else ".tar.gz"
-    archive = DEPS_DIR / f"temurin-jre-{JAVA_MAJOR}{ext}"
-    try:
-        _log(f"Downloading Java {JAVA_MAJOR} JRE...")
-        _download(url, archive, timeout=900.0)
-        if JAVA_INSTALL_DIR.exists():
-            shutil.rmtree(JAVA_INSTALL_DIR, ignore_errors=True)
-        JAVA_INSTALL_DIR.mkdir(parents=True, exist_ok=True)
-        _extract_archive(archive, JAVA_INSTALL_DIR)
-        archive.unlink(missing_ok=True)
-        if not bundled_java_binary():
-            return False, "Java download finished but java binary not found."
-        _save_state({"java_version": JAVA_MAJOR, "java_installed": True})
-        return True, f"Java {JAVA_MAJOR} JRE installed."
-    except (URLError, OSError, tarfile.TarError, zipfile.BadZipFile) as e:
-        return False, f"Java install failed: {e}"
+
+    versions_to_try = [req_version]
+    if req_version > 21:
+        if req_version == 25:
+            versions_to_try.extend([23, 21])
+        elif req_version == 24:
+            versions_to_try.extend([23, 21])
+
+    last_err = ""
+    for ver in versions_to_try:
+        url = (
+            "https://api.adoptium.net/v3/binary/latest/"
+            f"{ver}/ga/{os_map[os_name]}/{arch_map.get(arch, 'x64')}/jre/hotspot/normal/eclipse"
+        )
+        archive = DEPS_DIR / f"temurin-jre-{ver}{ext}"
+        try:
+            _log(f"Attempting to download Java {ver} JRE...")
+            _download(url, archive, timeout=900.0)
+            if JAVA_INSTALL_DIR.exists():
+                shutil.rmtree(JAVA_INSTALL_DIR, ignore_errors=True)
+            JAVA_INSTALL_DIR.mkdir(parents=True, exist_ok=True)
+            _extract_archive(archive, JAVA_INSTALL_DIR)
+            archive.unlink(missing_ok=True)
+            if bundled_java_binary():
+                _save_state({"java_version": ver, "java_installed": True})
+                return True, f"Java {ver} JRE installed."
+        except Exception as e:
+            last_err = str(e)
+            _log(f"Failed to download Java {ver} JRE: {e}")
+
+    # Try JDK instead of JRE
+    for ver in versions_to_try:
+        url = (
+            "https://api.adoptium.net/v3/binary/latest/"
+            f"{ver}/ga/{os_map[os_name]}/{arch_map.get(arch, 'x64')}/jdk/hotspot/normal/eclipse"
+        )
+        archive = DEPS_DIR / f"temurin-jdk-{ver}{ext}"
+        try:
+            _log(f"Attempting fallback to download Java {ver} JDK...")
+            _download(url, archive, timeout=900.0)
+            if JAVA_INSTALL_DIR.exists():
+                shutil.rmtree(JAVA_INSTALL_DIR, ignore_errors=True)
+            JAVA_INSTALL_DIR.mkdir(parents=True, exist_ok=True)
+            _extract_archive(archive, JAVA_INSTALL_DIR)
+            archive.unlink(missing_ok=True)
+            if bundled_java_binary():
+                _save_state({"java_version": ver, "java_installed": True})
+                return True, f"Java {ver} JDK installed."
+        except Exception as e:
+            last_err = str(e)
+            _log(f"Failed to download Java {ver} JDK: {e}")
+
+    return False, f"Java install failed (tried versions {versions_to_try}): {last_err}"
 
 
 def is_java_usable() -> bool:
@@ -303,15 +436,11 @@ def is_java_usable() -> bool:
     if not java:
         return False
     try:
-        r = subprocess.run(
-            [java, "-version"],
-            capture_output=True,
-            text=True,
-            timeout=12,
-            check=False,
-        )
-        out = (r.stderr or "") + (r.stdout or "")
-        return r.returncode == 0 or "version" in out.lower()
+        req_ver = get_required_java_version()
+        major = _java_major(java)
+        if major is None:
+            return False
+        return major >= req_ver
     except Exception:
         return False
 

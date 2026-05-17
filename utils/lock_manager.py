@@ -9,6 +9,13 @@ from pathlib import Path
 LOCK_LEASE_SECONDS = 45
 
 
+def _manager_port() -> int:
+    try:
+        return int(os.environ.get("APP_PORT", "7842") or "7842")
+    except Exception:
+        return 7842
+
+
 def get_lock_path(shared_dir: str | Path) -> Path:
     return Path(shared_dir).expanduser() / "host.lock"
 
@@ -50,7 +57,7 @@ def _payload(user: str, project_key: str = "", owner_node_id: str = "", created_
         "hostname": socket.gethostname(),
         "owner_node_id": str(owner_node_id or "").strip(),
         "ip": ip,
-        "ui_url": f"http://{ip}:7842",
+        "ui_url": f"http://{ip}:{_manager_port()}",
         "project_key": str(project_key or "").strip(),
         "time": created,
         "created_at": created,

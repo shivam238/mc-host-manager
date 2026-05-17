@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from typing import Any
 from urllib.parse import urlencode
 
@@ -8,7 +9,10 @@ from utils.config import get_node_id, load_user, normalize_path
 from utils import lock_manager, members_registry
 from utils.server_layout import normalize_server_id
 
-MANAGER_PORT = 7842
+try:
+    MANAGER_PORT = int(os.environ.get("APP_PORT", "7842") or "7842")
+except Exception:
+    MANAGER_PORT = 7842
 HTTP_TIMEOUT = 2.5
 
 
@@ -16,14 +20,12 @@ def local_lock_snapshot(cfg: dict[str, Any], *, running: bool) -> dict[str, Any]
     shared = normalize_path(cfg.get("shared_dir", ""))
     sid = normalize_server_id(str(cfg.get("server_id", "") or ""))
     lock_info = lock_manager.get_lock(shared) if shared else None
-    hosting = bool(
-        running
-        or (
-            lock_info
-            and not lock_info.get("expired")
-            and str(lock_info.get("host", "") or "").strip()
-        )
-    )
+
+    from utils.app_state import get_task
+    task = get_task()
+    task_active = bool(task and task.get("running"))
+
+    hosting = bool(running or task_active)
     return {
         "ok": True,
         "server_id": sid,

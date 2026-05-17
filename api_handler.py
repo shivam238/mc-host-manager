@@ -50,50 +50,71 @@ except ImportError:
 def browse_directory_native() -> str | None:
     import platform
     import subprocess
-    
+
     system = platform.system()
     if system == "Windows":
-        ps_code = (
-            "[void][System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms'); "
+        # 1. Try modern .NET FolderBrowserDialog forced to topmost
+        ps_code_modern = (
+            "Add-Type -AssemblyName System.Windows.Forms; "
             "$dialog = New-Object System.Windows.Forms.FolderBrowserDialog; "
             "$dialog.Description = 'Select Minecraft Server Folder'; "
             "$dialog.ShowNewFolderButton = $true; "
-            "if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $dialog.SelectedPath }"
+            "$win = New-Object System.Windows.Forms.Form; "
+            "$win.TopMost = $true; "
+            "if ($dialog.ShowDialog($win) -eq 'OK') { $dialog.SelectedPath }"
         )
         try:
-            cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_code]
-            out = subprocess.check_output(cmd, text=True).strip()
-            return out if out else None
+            cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_code_modern]
+            creationflags = 0
+            if hasattr(subprocess, "CREATE_NO_WINDOW"):
+                creationflags = subprocess.CREATE_NO_WINDOW
+            out = subprocess.check_output(cmd, text=True, creationflags=creationflags).strip()
+            if out:
+                return out
         except Exception:
             pass
-            
+
+        # 2. Fallback to Shell.Application COM object via PowerShell
+        ps_code_legacy = (
+            "$shell = New-Object -ComObject Shell.Application; "
+            "$folder = $shell.BrowseForFolder(0, 'Select Minecraft Server Folder', 0, 0); "
+            "if ($folder) { $folder.Self.Path }"
+        )
+        try:
+            cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_code_legacy]
+            creationflags = 0
+            if hasattr(subprocess, "CREATE_NO_WINDOW"):
+                creationflags = subprocess.CREATE_NO_WINDOW
+            out = subprocess.check_output(cmd, text=True, creationflags=creationflags).strip()
+            if out:
+                return out
+        except Exception:
+            pass
+
     elif system == "Linux":
+        if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+            return None
         # Try Zenity
         try:
-            out = subprocess.check_output(["zenity", "--file-selection", "--directory", "--title=Select Minecraft Server Folder"], text=True).strip()
+            out = subprocess.check_output(
+                ["zenity", "--file-selection", "--directory", "--title=Select Minecraft Server Folder"],
+                text=True,
+                timeout=120,
+            ).strip()
             return out if out else None
         except Exception:
             pass
         # Try KDialog
         try:
-            out = subprocess.check_output(["kdialog", "--getexistingdirectory", "--title", "Select Minecraft Server Folder"], text=True).strip()
+            out = subprocess.check_output(
+                ["kdialog", "--getexistingdirectory", "--title", "Select Minecraft Server Folder"],
+                text=True,
+                timeout=120,
+            ).strip()
             return out if out else None
         except Exception:
             pass
-            
-    # Tkinter Fallback
-    try:
-        import tkinter as tk
-        from tkinter import filedialog
-        root = tk.Tk()
-        root.withdraw()
-        root.attributes("-topmost", True)
-        folder = filedialog.askdirectory(title="Select Minecraft Server Folder")
-        root.destroy()
-        return folder if folder else None
-    except Exception:
-        pass
-        
+
     return None
 
 def read_json(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
@@ -191,6 +212,7 @@ def get_status(cfg: dict[str, Any]) -> dict[str, Any]:
     shared = normalize_path(cfg.get("shared_dir", ""))
     project_key = ensure_project_key(cfg)
     server_id = str(cfg.get("server_id", "") or "").strip()
+    fb_url = cfg.get("firebase_url", "")
     syn_folder = get_syncthing_folder(cfg)
     lock_info = lock_manager.get_lock(shared) if shared else None
     lock_host = str(lock_info.get("host", "") or "") if lock_info and not lock_info.get("expired") else ""
@@ -220,7 +242,6 @@ def get_status(cfg: dict[str, Any]) -> dict[str, Any]:
         )
 
         # Check Global Firebase lock
-        fb_url = cfg.get("firebase_url", "")
         if fb_url and server_id:
             from utils import matchmaker
             # Use the safe get_lock_data() wrapper — handles requests=None and network errors
@@ -231,7 +252,22 @@ def get_status(cfg: dict[str, Any]) -> dict[str, Any]:
             if ok_l and l_data and isinstance(l_data, dict):
                 now = int(time.time())
                 ls = l_data.get("t", 0)
-                if (now - ls) < 45: # Lock is active
+
+                is_active = False
+                if abs(now - ls) < 45:
+                    is_active = True
+                else:
+                    # Potential clock drift! Validate using active presence heartbeats
+                    ok_p, _, fb_members = cache_get(f"fb_presence:{server_id}", 3.0, lambda: matchmaker.fetch_presence(fb_url, server_id))
+                    if ok_p and fb_members:
+                        lock_node = str(l_data.get("node_id") or "").strip().upper().replace(".", "_").replace("-", "_")
+                        for fbm in fb_members:
+                            fbm_node = str(fbm.get("node_id") or "").strip().upper().replace(".", "_").replace("-", "_")
+                            if fbm_node == lock_node and fbm.get("hosting"):
+                                is_active = True
+                                break
+
+                if is_active:
                     import socket
                     my_host = socket.gethostname().lower().split('.')[0]
                     rem_host = str(l_data.get("hostname") or l_data.get("user") or "").lower().split('.')[0]
@@ -248,21 +284,23 @@ def get_status(cfg: dict[str, Any]) -> dict[str, Any]:
                             "node_id": l_data.get("node_id", ""),
                             "lock": {"host": l_data.get("user"), "expired": False}
                         }
+                else:
+                    # If Firebase confirms no active host is hosting, ignore any stale LAN response
+                    remote_lock = None
 
     import socket
     my_host = socket.gethostname().lower().split('.')[0]
     from utils.config import get_local_ip
     my_ip = get_local_ip()
-    
-    # 2. Final check: If the lock IP matches our IP, it's definitely US.
-    if remote_lock and remote_lock.get("hosting"):
-        rem_user = str(remote_lock.get("user") or "").lower().split('.')[0]
-        rem_host = str(remote_lock.get("hostname") or "").lower().split('.')[0]
-        rem_ip = str(remote_lock.get("peer_ip") or "")
-        
-        if rem_user == my_host or rem_host == my_host or rem_ip == my_ip:
-            # It's us! Wipe the remote_lock block
-            remote_lock = {"ok": True, "hosting": False, "running": False}
+
+    # 3. Clock drift/Stale Local Lock override: If Firebase is configured and the remote lock says NO peer is hosting,
+    # then any local file lock from a remote peer is 100% stale/leftover. Ignore it!
+    if fb_url and server_id and (not remote_lock or not remote_lock.get("hosting")):
+        if lock_info:
+            owner_node = lock_info.get("owner_node_id")
+            if owner_node and owner_node != get_node_id():
+                lock_info["expired"] = True
+                lock_host = ""
 
     gate = evaluate_start_gate(
         cfg,
@@ -307,19 +345,55 @@ def get_status(cfg: dict[str, Any]) -> dict[str, Any]:
                 else:
                     # Add new member found on Firebase
                     members_list.append(fbm)
-    
+
+    # Re-calculate counts and global status
     # Re-calculate counts and global status
     members_online = len([m for m in members_list if m.get("online")])
     members_total = len(members_list)
     members_list.sort(key=lambda r: (not r.get("hosting"), not r.get("online"), r.get("user", "").lower()))
-    
-    # Global running state: is ANYONE hosting?
-    any_hosting = any(m.get("hosting") for m in members_list)
+
+    # Global running state: is ANYONE else hosting?
+    any_other_hosting = False
     remote_host_name = ""
     for m in members_list:
-        if m.get("hosting") and m.get("user") != load_user():
-            remote_host_name = m.get("user", "")
-            break
+        if m.get("hosting"):
+            is_me = (
+                m.get("node_id") == get_node_id() or
+                m.get("user", "").lower() == load_user().lower() or
+                m.get("hostname", "").lower().split('.')[0] == my_host
+            )
+            if not is_me:
+                any_other_hosting = True
+                remote_host_name = m.get("user", "")
+                break
+
+    any_hosting = any_other_hosting
+
+    # ── Remote Metrics & Players Extraction ─────────────────
+    if not running and any_hosting:
+        active_member = None
+        for m_item in members_list:
+            if m_item.get("hosting"):
+                active_member = m_item
+                break
+
+        if active_member:
+            r_metrics = active_member.get("metrics")
+            r_players = active_member.get("players")
+
+            if r_metrics:
+                m = {
+                    "cpu_pct": int(r_metrics.get("cpu", 0)),
+                    "mem_pct": int(round((float(r_metrics.get("ram", 0)) / max(1.0, float(r_metrics.get("ram_alloc", 1.0)))) * 100.0)) if r_metrics.get("ram_alloc") else 0,
+                    "disk_pct": int(r_metrics.get("disk_pct", 0))
+                }
+                ram_used = float(r_metrics.get("ram", 0))
+
+            if r_players:
+                players = list(r_players.get("list", []))
+                pinfo = {}
+                for p_name in players:
+                    pinfo[p_name] = {"gamemode": "unknown", "health": None}
 
     setup_done = is_setup_complete(cfg)
     next_steps = build_next_steps(cfg, syn_h) if setup_done else [
@@ -402,6 +476,16 @@ def get_status(cfg: dict[str, Any]) -> dict[str, Any]:
 class APIHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         return
+
+    def _is_local_request(self) -> bool:
+        ip = str(self.client_address[0] if self.client_address else "")
+        return ip in ("127.0.0.1", "::1", "localhost")
+
+    def _require_local(self, msg: str = "This action is only available on the host PC.") -> bool:
+        if self._is_local_request():
+            return True
+        self._json({"ok": False, "msg": msg}, code=403)
+        return False
 
     def _json(self, data: Any, code: int = 200) -> None:
         try:
@@ -536,7 +620,7 @@ class APIHandler(BaseHTTPRequestHandler):
         if self.path.startswith("/remote/logs"):
             qs = parse_qs(urlparse(self.path).query)
             ip = qs.get("ip", [""])[0]
-            
+
             # Check if we can read the console tail locally from the synced shared directory!
             # This completely bypasses firewalls and NAT blocks.
             shared = normalize_path(cfg.get("shared_dir", ""))
@@ -579,6 +663,12 @@ class APIHandler(BaseHTTPRequestHandler):
             return
 
         if self.path.startswith("/backup/get"):
+            if not can_control_request(self, cfg):
+                self.send_response(403)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(b"Control blocked (project key mismatch).")
+                return
             q = parse_qs(urlparse(self.path).query)
             name = str((q.get("name") or [""])[0])
             shared = normalize_path(cfg.get("shared_dir", ""))
@@ -602,6 +692,12 @@ class APIHandler(BaseHTTPRequestHandler):
             return
 
         if self.path.startswith("/server/download"):
+            if not can_control_request(self, cfg):
+                self.send_response(403)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(b"Control blocked (project key mismatch).")
+                return
             ok, msg = validate_paths(cfg, True, False)
             if not ok:
                 self.send_response(400)
@@ -681,6 +777,8 @@ class APIHandler(BaseHTTPRequestHandler):
             return
 
         if self.path.startswith("/open-folder"):
+            if not self._require_local():
+                return
             q = parse_qs(urlparse(self.path).query)
             target = str((q.get("target") or [""])[0]).strip().lower()
             custom = str((q.get("path") or [""])[0]).strip()
@@ -719,18 +817,27 @@ class APIHandler(BaseHTTPRequestHandler):
         body = read_json(self)
 
         if self.path == "/setup/quick":
+            if not can_control_request(self, cfg, body):
+                self._json({"ok": False, "msg": "Control blocked (project key mismatch)."}, code=403)
+                return
             result = run_quick_setup(body, st_api)
             clear_cache()
             self._json(result, code=200 if result.get("ok") else 400)
             return
 
         if self.path == "/deps/install":
+            if not can_control_request(self, cfg, body):
+                self._json({"ok": False, "msg": "Control blocked (project key mismatch)."}, code=403)
+                return
             result = dependency_manager.start_install_async()
             clear_cache()
             self._json(result)
             return
 
         if self.path == "/sync/world/lan/pull":
+            if not can_control_request(self, cfg, body):
+                self._json({"ok": False, "msg": "Control blocked (project key mismatch)."}, code=403)
+                return
             if mc_server.is_running() or is_task_running():
                 self._json({"ok": False, "msg": "Pehle apna server STOP karo, phir world download karo."})
                 return
@@ -746,6 +853,9 @@ class APIHandler(BaseHTTPRequestHandler):
             return
 
         if self.path == "/sync/world/auto":
+            if not can_control_request(self, cfg, body):
+                self._json({"ok": False, "msg": "Control blocked (project key mismatch)."}, code=403)
+                return
             if mc_server.is_running() or is_task_running():
                 self._json({"ok": False, "msg": "Pehle apna server STOP karo."})
                 return
@@ -825,6 +935,8 @@ class APIHandler(BaseHTTPRequestHandler):
             return
 
         if self.path == "/config/browse_folder":
+            if not self._require_local("Folder picker can only open on the host PC. Type the path manually on remote devices."):
+                return
             p = browse_directory_native()
             if p:
                 self._json({"ok": True, "path": p})
@@ -833,6 +945,9 @@ class APIHandler(BaseHTTPRequestHandler):
             return
 
         if self.path == "/config/save":
+            if not can_control_request(self, cfg, body):
+                self._json({"ok": False, "msg": "Control blocked (project key mismatch)."}, code=403)
+                return
             if "user" in body:
                 save_user(str(body.get("user", "")))
                 body.pop("user", None)
@@ -900,6 +1015,9 @@ class APIHandler(BaseHTTPRequestHandler):
             return
 
         if self.path == "/server/create":
+            if not can_control_request(self, cfg, body):
+                self._json({"ok": False, "msg": "Control blocked (project key mismatch)."}, code=403)
+                return
             result = create_server_group(
                 user=str(body.get("user", "") or load_user()),
                 server_dir=str(body.get("server_dir", "") or ""),
@@ -923,6 +1041,9 @@ class APIHandler(BaseHTTPRequestHandler):
             return
 
         if self.path == "/server/join":
+            if not can_control_request(self, cfg, body):
+                self._json({"ok": False, "msg": "Control blocked (project key mismatch)."}, code=403)
+                return
             raw = str(
                 body.get("invite")
                 or body.get("friend_invite")
@@ -1003,7 +1124,7 @@ class APIHandler(BaseHTTPRequestHandler):
                         matchmaker.clear_signal(fb_url, sid)
                     except Exception:
                         pass
-                        
+
                 prepare_then_start(
                     cfg_t,
                     cb,
@@ -1079,6 +1200,9 @@ class APIHandler(BaseHTTPRequestHandler):
             return
 
         if self.path == "/backup/now":
+            if not can_control_request(self, cfg, body):
+                self._json({"ok": False, "msg": "Control blocked (project key mismatch)."}, code=403)
+                return
             if is_task_running():
                 self._json({"ok": False, "msg": "Another operation is running."})
                 return
@@ -1087,6 +1211,9 @@ class APIHandler(BaseHTTPRequestHandler):
             return
 
         if self.path == "/backup/restore":
+            if not can_control_request(self, cfg, body):
+                self._json({"ok": False, "msg": "Control blocked (project key mismatch)."}, code=403)
+                return
             if is_task_running():
                 self._json({"ok": False, "msg": "Another operation is running."})
                 return
@@ -1096,6 +1223,9 @@ class APIHandler(BaseHTTPRequestHandler):
             return
 
         if self.path == "/syncthing/add-device":
+            if not can_control_request(self, cfg, body):
+                self._json({"ok": False, "msg": "Control blocked (project key mismatch)."}, code=403)
+                return
             did = str(body.get("device_id", "") or body.get("deviceID", "") or "").strip()
             name = str(body.get("name", "") or "").strip()
             folder = get_syncthing_folder(cfg)
@@ -1105,6 +1235,9 @@ class APIHandler(BaseHTTPRequestHandler):
             return
 
         if self.path == "/syncthing/apply-invite":
+            if not can_control_request(self, cfg, body):
+                self._json({"ok": False, "msg": "Control blocked (project key mismatch)."}, code=403)
+                return
             invite_raw = str(body.get("invite", "") or body.get("payload", "") or "").strip()
             if not invite_raw:
                 self._json({"ok": False, "msg": "Paste invite code or Server ID."})
@@ -1119,6 +1252,9 @@ class APIHandler(BaseHTTPRequestHandler):
             return
 
         if self.path == "/sync/now":
+            if not can_control_request(self, cfg, body):
+                self._json({"ok": False, "msg": "Control blocked (project key mismatch)."}, code=403)
+                return
             try:
                 done = st_api.scan_folder(get_syncthing_folder(cfg))
                 self._json({"ok": bool(done), "msg": "Sync scan triggered." if done else "Sync trigger failed."})
@@ -1141,24 +1277,29 @@ class APIHandler(BaseHTTPRequestHandler):
                 # Try to proxy command to remote host
                 remote_lock = poll_remote_hosting(cfg, members=st_api.list_peers())
                 remote_ip = remote_lock.get("peer_ip") if remote_lock else ""
-                
+
                 success = False
-                if remote_ip:
+                if remote_ip and requests is not None:
                     try:
                         r = requests.post(f"http://{remote_ip}:7842/command", json=body, timeout=2.0)
                         self._json(r.json())
                         success = True
                     except Exception as e:
                         pass # Fallback to Firebase
-                
+
                 if not success:
                     fb_url = cfg.get("firebase_url")
                     sid = cfg.get("server_id")
                     if fb_url and sid:
                         from utils import matchmaker
                         target_node = remote_lock.get("node_id") if remote_lock else "ANY"
-                        matchmaker.send_signal(fb_url, sid, f"mc:{cmd}", target_node=target_node, sender_node=get_node_id())
-                        self._json({"ok": True, "msg": "Sent via Firebase (Network was blocked)"})
+                        sent = matchmaker.send_signal(fb_url, sid, f"mc:{cmd}", target_node=target_node, sender_node=get_node_id())
+                        self._json(
+                            {
+                                "ok": bool(sent),
+                                "msg": "Sent via Firebase (Network was blocked)" if sent else "Remote command failed.",
+                            }
+                        )
                     else:
                         self._json({"ok": False, "msg": "Server is offline (No remote host or Firebase)."})
                 return
@@ -1167,6 +1308,9 @@ class APIHandler(BaseHTTPRequestHandler):
             return
 
         if self.path == "/players/refresh":
+            if not can_control_request(self, cfg, body):
+                self._json({"ok": False, "msg": "Control blocked (project key mismatch)."}, code=403)
+                return
             if mc_server.is_running():
                 mc_server.send_command("list")
                 for p in mc_server.get_online_players():

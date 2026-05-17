@@ -1,8 +1,7 @@
 from __future__ import annotations
 import threading
 import time
-import os
-import subprocess
+import socket
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -93,32 +92,13 @@ def safe_copy_world_from_shared(shared_dir: Path, server_dir: Path, cb) -> None:
     cb(30, "Syncing world from shared...")
     backup_manager.copy_world(src, server_dir, progress_cb=lambda p, m: cb(30 + int(p * 0.2), m))
 
-def kill_port_process(port: int = 25565):
-    """Forcefully kill any process occupying the Minecraft port."""
+def is_port_in_use(port: int = 25565) -> bool:
+    """Return True when something is already listening on the Minecraft port."""
     try:
-        import subprocess
-        import os
-        if os.name == "nt":
-            # Windows
-            cmd = f"netstat -ano | findstr :{port}"
-            lines = subprocess.check_output(cmd, shell=True).decode().splitlines()
-            for line in lines:
-                parts = line.split()
-                if len(parts) > 4:
-                    pid = parts[-1]
-                    subprocess.run(["taskkill", "/F", "/PID", pid], capture_output=True)
-        else:
-            # Linux/Mac
-            cmd = f"lsof -t -i:{port}"
-            try:
-                pids = subprocess.check_output(cmd, shell=True).decode().splitlines()
-                for pid in pids:
-                    if pid.strip():
-                        subprocess.run(["kill", "-9", pid.strip()], capture_output=True)
-            except subprocess.CalledProcessError:
-                pass # No process found
+        with socket.create_connection(("127.0.0.1", int(port)), timeout=0.35):
+            return True
     except Exception:
-        pass
+        return False
 
 def finalize_stop_flow(cfg: dict[str, Any], cb, reason: str = "normal") -> None:
     shared = ensure_shared_layout(cfg["shared_dir"])
@@ -135,15 +115,21 @@ def finalize_stop_flow(cfg: dict[str, Any], cb, reason: str = "normal") -> None:
         pass
 
     cb(35, "Creating backup...")
-    backup_manager.create_timestamped_backup(
-        server,
-        shared / "backups",
-        int(cfg.get("backup_keep", 5)),
-        progress_cb=lambda p, m: cb(35 + int(p * 0.3), m),
-    )
+    try:
+        backup_manager.create_timestamped_backup(
+            server,
+            shared / "backups",
+            int(cfg.get("backup_keep", 5)),
+            progress_cb=lambda p, m: cb(35 + int(p * 0.3), m),
+        )
+    except Exception as e:
+        cb(35, f"Backup failed (continuing): {e}")
 
     cb(70, "Syncing world to shared...")
-    backup_manager.copy_world(server, shared / "world_latest", progress_cb=lambda p, m: cb(70 + int(p * 0.2), m))
+    try:
+        backup_manager.copy_world(server, shared / "world_latest", progress_cb=lambda p, m: cb(70 + int(p * 0.2), m))
+    except Exception as e:
+        cb(70, f"Sync failed (continuing): {e}")
 
     cb(95, "Releasing locks...")
     # 1. Release Local Lock
@@ -194,9 +180,11 @@ def finalize_stop_flow(cfg: dict[str, Any], cb, reason: str = "normal") -> None:
     cb(100, "Stopped safely")
 
 def start_flow(cfg: dict[str, Any], cb) -> None:
-    cb(5, "Clearing port 25565...")
-    kill_port_process(25565)
-    time.sleep(1.0)
+    cb(5, "Checking Minecraft port...")
+    if is_port_in_use(25565):
+        raise RuntimeError(
+            "Port 25565 is already in use. Close the other Minecraft server/app first, then START again."
+        )
     
     ok, msg = validate_paths(cfg, True, True)
     if not ok:
@@ -258,7 +246,8 @@ def start_flow(cfg: dict[str, Any], cb) -> None:
             host_state["ready"] = False
             host_state["last_cfg"] = dict(cfg)
 
-        safe_copy_world_from_shared(shared, server, cb)
+        if bool(cfg.get("auto_world_before_start", True)) and not bool(cfg.get("_skip_shared_world_pull")):
+            safe_copy_world_from_shared(shared, server, cb)
 
         cb(60, "Applying server settings...")
         try:
@@ -266,7 +255,20 @@ def start_flow(cfg: dict[str, Any], cb) -> None:
         except Exception:
             pass
 
-        cb(72, "Starting server...")
+        cb(72, "Checking Java runtime...")
+        try:
+            import platform
+            from utils.dependency_manager import is_java_usable
+            if not is_java_usable():
+                # Non-blocking Java check - don't download during startup on Windows
+                # Java should be pre-installed to avoid UI lag
+                if platform.system() != "Windows":
+                    from utils.dependency_manager import ensure_all_dependencies
+                    ensure_all_dependencies(want_syncthing=False, want_java=True, want_requests=False, start_sync=False)
+        except Exception:
+            pass
+
+        cb(75, "Starting server...")
         ram_args = f"-Xmx{cfg['ram']} -Xms2G"
         ok_start, msg_start = mc_server.start(server, str(cfg.get("server_jar", "server.jar")), ram_args, shared_dir=shared)
         if not ok_start:
@@ -282,7 +284,18 @@ def start_flow(cfg: dict[str, Any], cb) -> None:
             fb_url = cfg.get("firebase_url", "")
             if fb_url:
                 from utils import matchmaker
-                matchmaker.touch_presence(fb_url, cfg["server_id"], get_node_id(), hosting=True)
+                import socket
+                hname = socket.gethostname().lower().split('.')[0]
+                matchmaker.update_presence(
+                    fb_url, cfg["server_id"], hname,
+                    {
+                        "node_id": get_node_id(),
+                        "user": load_user(),
+                        "hostname": socket.gethostname(),
+                        "ip": get_local_ip(),
+                        "hosting": True
+                    }
+                )
         except Exception:
             pass
 
@@ -314,16 +327,25 @@ def backup_now(cfg: dict[str, Any], cb) -> None:
         raise RuntimeError(msg)
     server = Path(cfg["server_dir"])
     shared = ensure_shared_layout(cfg["shared_dir"])
-    cb(10, "Preparing backup...")
-    b = backup_manager.create_timestamped_backup(
-        server,
-        shared / "backups",
-        int(cfg.get("backup_keep", 5)),
-        progress_cb=lambda p, m: cb(10 + int(p * 0.8), m),
-    )
-    if b is None:
-        raise RuntimeError("No world folders found to back up.")
-    cb(100, "Backup complete")
+    saves_paused = False
+    try:
+        if mc_server.is_running():
+            cb(5, "Saving world before backup...")
+            saves_paused = mc_server.prepare_for_copy()
+
+        cb(10, "Preparing backup...")
+        b = backup_manager.create_timestamped_backup(
+            server,
+            shared / "backups",
+            int(cfg.get("backup_keep", 5)),
+            progress_cb=lambda p, m: cb(10 + int(p * 0.8), m),
+        )
+        if b is None:
+            raise RuntimeError("No world folders found to back up.")
+        cb(100, "Backup complete")
+    finally:
+        if saves_paused:
+            mc_server.resume_saves()
 
 def restore_backup(cfg: dict[str, Any], name: str, cb) -> None:
     ok, msg = validate_paths(cfg, True, True)

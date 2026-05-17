@@ -75,7 +75,7 @@ body {
   min-height: 70px;
 }
 .k { font-size: .76rem; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
-.v { font-size: 1.15rem; font-weight: 700; margin-top: 4px; }
+.v { font-size: 1.15rem; font-weight: 700; margin-top: 4px; word-break: break-all; }
 .v.ok { color: var(--ok); }
 .v.warn { color: var(--warn); }
 .v.err { color: var(--err); }

@@ -47,6 +47,7 @@ if exist "bin" (
     --onefile ^
     --name mc-host-manager ^
     --add-data "ui.html;." ^
+    --add-data "ui;ui" ^
     --add-data "utils;utils" ^
     --add-data "bin;bin" ^
     --hidden-import zipfile ^
@@ -58,6 +59,7 @@ if exist "bin" (
     --onefile ^
     --name mc-host-manager ^
     --add-data "ui.html;." ^
+    --add-data "ui;ui" ^
     --add-data "utils;utils" ^
     --hidden-import zipfile ^
     host_manager.py

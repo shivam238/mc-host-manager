@@ -37,6 +37,7 @@ fi
   --onefile \
   --name mc-host-manager \
   --add-data "ui.html:." \
+  --add-data "ui:ui" \
   --add-data "utils:utils" \
   "${EXTRA_DATA[@]}" \
   --hidden-import zipfile \

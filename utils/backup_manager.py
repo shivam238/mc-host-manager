@@ -40,9 +40,13 @@ def create_timestamped_backup(
     backup_path = Path(backup_dir)
     backup_path.mkdir(parents=True, exist_ok=True)
     
-    ts = datetime.now().strftime("%Y-%m-%d_%H-%M")
+    ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     zip_name = f"backup_{ts}.zip"
     target_zip = backup_path / zip_name
+    suffix = 1
+    while target_zip.exists():
+        target_zip = backup_path / f"backup_{ts}_{suffix}.zip"
+        suffix += 1
     
     files_to_zip: List[Path] = []
     world_dirs = get_world_dirs(server_path)
@@ -160,6 +164,10 @@ def restore_backup(
             world_members = [m for m in members if any(m.startswith(w + "/") for w in world_dirs)]
             if not world_members:
                 return False
+            for m in world_members:
+                dest = (server_path / m).resolve()
+                if dest != server_path and server_path not in dest.parents:
+                    return False
             for w in world_dirs:
                 target = server_path / w
                 if target.exists():
@@ -170,4 +178,3 @@ def restore_backup(
         return True
     except Exception:
         return False
-

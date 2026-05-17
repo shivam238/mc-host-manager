@@ -100,6 +100,16 @@ def safe_rmtree(path: Path) -> None:
         except Exception:
             pass
 
+
+def _safe_extract_zip(zf: zipfile.ZipFile, target: Path) -> None:
+    target_resolved = target.resolve()
+    for member in zf.infolist():
+        out_path = (target / member.filename).resolve()
+        if out_path != target_resolved and target_resolved not in out_path.parents:
+            raise ValueError(f"Unsafe path in zip: {member.filename}")
+    zf.extractall(target)
+
+
 def apply_world_zip(server_dir: str | Path, data: bytes) -> tuple[bool, str]:
     root = Path(server_dir).expanduser()
     if not root.is_dir():
@@ -108,21 +118,24 @@ def apply_world_zip(server_dir: str | Path, data: bytes) -> tuple[bool, str]:
     if not data:
         return False, "Empty download."
 
-    with tempfile.TemporaryDirectory() as tmp:
-        tmp_path = Path(tmp)
-        with zipfile.ZipFile(io.BytesIO(data), "r") as zf:
-            zf.extractall(tmp_path)
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            with zipfile.ZipFile(io.BytesIO(data), "r") as zf:
+                _safe_extract_zip(zf, tmp_path)
 
-        moved = 0
-        for item in tmp_path.iterdir():
-            dest = root / item.name
-            if item.is_dir():
-                if dest.exists():
-                    safe_rmtree(dest)
-                shutil.copytree(item, dest)
-            else:
-                shutil.copy2(item, dest)
-            moved += 1
+            moved = 0
+            for item in tmp_path.iterdir():
+                dest = root / item.name
+                if item.is_dir():
+                    if dest.exists():
+                        safe_rmtree(dest)
+                    shutil.copytree(item, dest)
+                else:
+                    shutil.copy2(item, dest)
+                moved += 1
+    except (zipfile.BadZipFile, ValueError, OSError) as e:
+        return False, f"Invalid world zip: {e}"
 
     return True, f"World installed into {root} ({moved} item(s))."
 

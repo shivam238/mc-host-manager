@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Optional
+import os
 import subprocess
 import threading
 import platform
@@ -29,6 +30,15 @@ class ServerController:
     LEAVE_PATTERN = re.compile(r":\s+([A-Za-z0-9_]{1,32}) left the game", re.IGNORECASE)
     LIST_PATTERN = re.compile(r"There are (\d+) of a max .* players online(?::\s*(.*))?$", re.IGNORECASE)
     NBT_PATTERN = re.compile(r":\s+([A-Za-z0-9_]{1,32}) has the following entity data: \{(.+)\}\s*$", re.IGNORECASE)
+    FATAL_START_PATTERNS = (
+        re.compile(r"not recognized as an internal or external command", re.IGNORECASE),
+        re.compile(r"unable to access jarfile", re.IGNORECASE),
+        re.compile(r"unsupportedclassversionerror", re.IGNORECASE),
+        re.compile(r"invalid maximum heap size", re.IGNORECASE),
+        re.compile(r"could not reserve enough space", re.IGNORECASE),
+        re.compile(r"could not find or load main class", re.IGNORECASE),
+        re.compile(r"failed to load datapacks, can't proceed", re.IGNORECASE),
+    )
 
     def is_running(self):
         return self.proc is not None and self.proc.poll() is None
@@ -37,29 +47,30 @@ class ServerController:
         if self.is_running(): return False, "Already running"
         
         server_path = Path(server_dir)
+        try:
+            server_path.mkdir(parents=True, exist_ok=True)
+            (server_path / "eula.txt").write_text("eula=true\n", encoding="utf-8")
+        except Exception:
+            pass
+
         run_sh = server_path / "run.sh"
         run_bat = server_path / "run.bat"
         start_bat = server_path / "start.bat"
 
         cmd: list[str]
         system = platform.system()
+        env = self._build_process_env()
         if system == "Windows" and run_bat.exists():
-            cmd = ["cmd", "/c", "run.bat"]
+            cmd = ["cmd", "/d", "/s", "/c", "call", "run.bat"]
         elif system == "Windows" and start_bat.exists():
-            cmd = ["cmd", "/c", "start.bat"]
+            cmd = ["cmd", "/d", "/s", "/c", "call", "start.bat"]
         elif run_sh.exists() and system != "Windows":
             cmd = ["bash", "run.sh"]
         else:
             jar_file = self._resolve_server_jar(server_path, jar_name)
             if jar_file is None:
                 return False, f"Server jar not found in {server_path}. Set correct 'server_jar' in Options."
-            java_bin = "java"
-            try:
-                from utils.dependency_manager import resolve_java_binary
-
-                java_bin = resolve_java_binary() or "java"
-            except Exception:
-                pass
+            java_bin = self._resolve_java_binary()
             cmd = [java_bin] + java_args.split() + ["-jar", jar_file.name, "nogui"]
 
         try:
@@ -68,10 +79,18 @@ class ServerController:
                 self.started_at = time.time()
                 self.online_players.clear()
                 self.player_stats.clear()
+            with self.log_lock:
+                self.logs.clear()
+            
+            # Windows optimization: use CREATE_NO_WINDOW to reduce UI flickering
+            creationflags = 0
+            if system == "Windows":
+                creationflags = 0x08000000  # CREATE_NO_WINDOW
+            
             self.proc = subprocess.Popen(
                 cmd, cwd=str(server_path),
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                encoding="utf-8", errors="replace", bufsize=1
+                encoding="utf-8", errors="replace", bufsize=1, env=env, creationflags=creationflags
             )
             
             proc = self.proc
@@ -88,30 +107,121 @@ class ServerController:
             
             threading.Thread(target=reader, daemon=True).start()
 
+            failed, fail_msg = self._check_immediate_exit(proc)
+            if failed:
+                return False, fail_msg
+
             if shared_dir:
                 def log_sync_worker():
                     shared_path = Path(shared_dir)
                     console_file = shared_path / ".remote_console.json"
+                    is_windows = platform.system() == "Windows"
+                    sync_interval = 5.0 if is_windows else 2.0  # Longer interval on Windows to reduce file lock contention
+                    last_lines = None
                     while self.is_running():
                         try:
                             lines = self.get_logs(100)
+                            # Skip write if no new lines to reduce file I/O
+                            if lines == last_lines:
+                                time.sleep(sync_interval)
+                                continue
+                            last_lines = lines
                             import json
                             # Retry loop to handle Windows file lock contention with Syncthing
-                            for attempt in range(5):
+                            max_retries = 3 if is_windows else 2
+                            for attempt in range(max_retries):
                                 try:
                                     with open(str(console_file), "w", encoding="utf-8", errors="replace") as f:
-                                        json.dump({"logs": lines}, f, ensure_ascii=False, indent=2)
+                                        # Use compact JSON (no indent) to reduce file size and write time
+                                        json.dump({"logs": lines}, f, ensure_ascii=False, separators=(',', ':'))
                                     break
-                                except PermissionError:
-                                    time.sleep(0.1)
+                                except (PermissionError, OSError):
+                                    if attempt < max_retries - 1:
+                                        time.sleep(0.2 if is_windows else 0.1)
                         except Exception:
                             pass
-                        time.sleep(1.5)
+                        time.sleep(sync_interval)
                 threading.Thread(target=log_sync_worker, daemon=True).start()
 
             return True, "Server started"
         except Exception as e:
             return False, str(e)
+
+    @staticmethod
+    def _resolve_java_binary() -> str:
+        try:
+            from utils.dependency_manager import resolve_java_binary
+
+            return resolve_java_binary() or "java"
+        except Exception:
+            return "java"
+
+    def _build_process_env(self) -> dict[str, str]:
+        env = os.environ.copy()
+        java_bin = self._resolve_java_binary()
+        if java_bin == "java":
+            return env
+
+        java_path = Path(java_bin)
+        java_dir = java_path.parent
+        if not java_dir:
+            return env
+
+        env["PATH"] = str(java_dir) + os.pathsep + env.get("PATH", "")
+        if java_dir.name.lower() == "bin":
+            env.setdefault("JAVA_HOME", str(java_dir.parent))
+        return env
+
+    def _check_immediate_exit(self, proc: subprocess.Popen, wait_seconds: float = 2.0) -> tuple[bool, str]:
+        deadline = time.time() + wait_seconds
+        while time.time() < deadline:
+            fatal_msg = self._fatal_start_log_message()
+            if fatal_msg:
+                try:
+                    proc.terminate()
+                    proc.wait(timeout=2)
+                except Exception:
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+                self._mark_failed_start()
+                return True, fatal_msg
+
+            code = proc.poll()
+            if code is None:
+                time.sleep(0.05)
+                continue
+
+            time.sleep(0.1)
+            tail = self._recent_logs()
+            self._mark_failed_start()
+            detail = "\n".join(tail).strip()
+            if detail:
+                return True, f"Server exited immediately (code {code}). Last log:\n{detail}"
+            return True, f"Server exited immediately (code {code}). Check your server jar/start script."
+        return False, ""
+
+    def _recent_logs(self) -> list[str]:
+        with self.log_lock:
+            return list(self.logs)[-8:]
+
+    def _fatal_start_log_message(self) -> str:
+        tail = self._recent_logs()
+        if not tail:
+            return ""
+        for line in tail:
+            if any(p.search(line) for p in self.FATAL_START_PATTERNS):
+                return "Server startup failed. Last log:\n" + "\n".join(tail).strip()
+        return ""
+
+    def _mark_failed_start(self) -> None:
+        self.proc = None
+        with self.state_lock:
+            self.ready = False
+            self.started_at = None
+            self.online_players.clear()
+            self.player_stats.clear()
 
     @staticmethod
     def _resolve_server_jar(server_path: Path, jar_name: str) -> Optional[Path]:
@@ -147,8 +257,15 @@ class ServerController:
                 stdin.write("stop\n")
                 stdin.flush()
             proc.wait(timeout=30)
-        except:
-            proc.terminate()
+        except Exception:
+            try:
+                proc.terminate()
+                proc.wait(timeout=8)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
         self.proc = None
         with self.state_lock:
             self.ready = False
@@ -164,7 +281,8 @@ class ServerController:
                     stdin.write(cmd + "\n")
                     stdin.flush()
                     return True
-            except: return False
+            except Exception:
+                return False
         return False
 
     def is_ready(self):

@@ -85,22 +85,52 @@ def monitor_members_presence() -> None:
                 server_id=sid,
                 hosting=hosting,
             )
-            
+
             # Global Presence (Firebase)
             fb_url = cfg.get("firebase_url", "")
             if fb_url and sid:
                 from utils.config import get_node_id, load_user, get_local_ip
                 import socket
                 hname = socket.gethostname().lower().split('.')[0]
+
+                # Gather Metrics & Players for real-time remote dashboard sync
+                metrics = None
+                players = None
+                if hosting:
+                    try:
+                        from api_handler import get_server_metrics, parse_ram_to_mb
+                        pid = mc_server.get_pid()
+                        ram_used = mc_server.get_ram_mb()
+                        ram_alloc = parse_ram_to_mb(cfg.get("ram", ""))
+                        m = get_server_metrics(pid, ram_used, ram_alloc)
+                        metrics = {
+                            "cpu": int(m.get("cpu_pct", 0)),
+                            "ram": float(ram_used or 0.0),
+                            "ram_alloc": int(ram_alloc or 0)
+                        }
+                        players_list = mc_server.get_online_players()
+                        players = {
+                            "online": len(players_list),
+                            "list": players_list
+                        }
+                    except Exception:
+                        pass
+
+                presence_payload = {
+                    "node_id": get_node_id(),
+                    "user": load_user(),
+                    "hostname": socket.gethostname(),
+                    "ip": get_local_ip(),
+                    "hosting": hosting
+                }
+                if metrics:
+                    presence_payload["metrics"] = metrics
+                if players:
+                    presence_payload["players"] = players
+
                 matchmaker.update_presence(
                     fb_url, sid, hname,
-                    {
-                        "node_id": get_node_id(),
-                        "user": load_user(),
-                        "hostname": socket.gethostname(),
-                        "ip": get_local_ip(),
-                        "hosting": hosting
-                    }
+                    presence_payload
                 )
 
             # Matchmaking: Auto-accept peers if we are the host
@@ -176,10 +206,25 @@ def monitor_lock_heartbeat() -> None:
             is_ok, _, lock_data = matchmaker.get_lock_data(fb_url, sid)
             if is_ok and lock_data:
                 owner = lock_data.get("node_id")
-                now = int(time.time())
-                lock_time = lock_data.get("t", 0)
-                # If lock is fresh (within 45s) and NOT ours
-                if owner and owner != get_node_id() and (now - lock_time) < 45:
+                # Instead of relying strictly on timestamps which are broken by clock skew,
+                # check if the owner is actively broadcasting 'hosting: true' in presence data.
+                owner_is_hosting = False
+                try:
+                    from utils import matchmaker
+                    ok_p, _, members = matchmaker.fetch_presence(fb_url, sid)
+                    if ok_p and members:
+                        for m in members:
+                            if m.get("node_id") == owner and m.get("hosting"):
+                                owner_is_hosting = True
+                                break
+                except Exception:
+                    # Fallback to local clock calculation with generous 300s window if offline
+                    now = int(time.time())
+                    lock_time = lock_data.get("t", 0)
+                    if (now - lock_time) < 300:
+                        owner_is_hosting = True
+                        
+                if owner and owner != get_node_id() and owner_is_hosting:
                     print(f"[CONFLICT] Lock stolen by {owner}! Shutting down to prevent split-brain...")
                     with host_lock:
                         host_state["active"] = False
@@ -208,7 +253,7 @@ def monitor_lock_heartbeat() -> None:
 
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
-    allow_reuse_address = (os.name != "nt")
+    allow_reuse_address = True
 
 shutdown_lock = threading.Lock()
 shutdown_started = False
@@ -281,12 +326,16 @@ if __name__ == "__main__":
     threading.Thread(target=monitor_lock_heartbeat, daemon=True).start()
     threading.Thread(target=monitor_members_presence, daemon=True).start()
 
-    PORT = 7842
+    try:
+        PORT = int(os.environ.get("APP_PORT", "7842") or "7842")
+    except Exception:
+        PORT = 7842
+    bind_host = os.environ.get("APP_BIND", "0.0.0.0") or "0.0.0.0"
     print(f"[INFO] MC Host Manager (modular) running on http://localhost:{PORT}")
 
     server = None
     try:
-        server = ThreadedHTTPServer(("0.0.0.0", PORT), APIHandler)
+        server = ThreadedHTTPServer((bind_host, PORT), APIHandler)
         server.serve_forever()
     except OSError as e:
         print(f"[ERROR] Server error: {e}")

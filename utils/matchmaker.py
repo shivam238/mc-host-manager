@@ -120,7 +120,8 @@ def fetch_presence(firebase_url: str, server_id: str) -> tuple[bool, str, list[d
                     # Only show members active in last 120 seconds
                     ls = row.get("last_seen", 0)
                     if (now - ls) < 120:
-                        row["node_id"] = node_id
+                        row["presence_key"] = node_id
+                        row.setdefault("node_id", node_id)
                         row["online"] = True
                         members.append(row)
                 return True, f"Found {len(members)} active members", members
@@ -145,8 +146,24 @@ def acquire_lock(firebase_url: str, server_id: str, user_data: dict[str, Any]) -
             if existing and isinstance(existing, dict):
                 ls = existing.get("t", 0)
                 owner = existing.get("user", "Someone")
-                # If lock is less than 45s old, it is ACTIVE
-                if (now - ls) < 45:
+                # Evaluate if the lock owner is STILL actively broadcasting presence
+                owner_active_hosting = False
+                try:
+                    p_url = f"{_get_base_url(firebase_url)}/presence/{server_id.upper()}.json"
+                    pr = requests.get(p_url, timeout=3).json()
+                    if pr and isinstance(pr, dict):
+                        for nid, row in pr.items():
+                            # If a node is broadcasting recently AND claims to be hosting
+                            if isinstance(row, dict) and (now - row.get("last_seen", 0)) < 120:
+                                if row.get("node_id") == existing.get("node_id") and row.get("hosting"):
+                                    owner_active_hosting = True
+                                    break
+                except Exception:
+                    # Fallback to timestamp if presence fails, but allow a larger drift window (300s)
+                    if (now - ls) < 300:
+                        owner_active_hosting = True
+
+                if owner_active_hosting:
                     if existing.get("node_id") != user_data.get("node_id"):
                         return False, f"Already hosted by {owner}"
 

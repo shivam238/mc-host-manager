@@ -20,6 +20,20 @@ let wizardPinnedOpen = false;
 let backendOffline = false;
 const toastSeen = new Set();
 
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  }[ch]));
+}
+
+function encodeUrlArg(value) {
+  return encodeURIComponent(String(value ?? '')).replace(/'/g, '%27');
+}
+
 function setWizardMode(mode) {
   wizardMode = mode === 'join' ? 'join' : 'host';
   document.getElementById('w-tab-host')?.classList.toggle('on', wizardMode === 'host');
@@ -57,7 +71,7 @@ function updateSetupUI(d) {
     const steps = Array.isArray(d?.setup_next_steps) ? d.setup_next_steps : [];
     if (complete && steps.length) {
       banner.classList.remove('hidden');
-      banner.innerHTML = '<b>Agla step:</b> ' + steps.map((s) => `<span>${s}</span>`).join(' · ');
+      banner.innerHTML = '<b>Agla step:</b> ' + steps.map((s) => `<span>${escapeHtml(s)}</span>`).join(' · ');
     } else {
       banner.classList.add('hidden');
       banner.innerHTML = '';
@@ -177,6 +191,8 @@ function closeWizardToDashboard() {
   pollStatus();
 }
 
+
+
 async function copyServerId() {
   const id = state.server_id || document.getElementById('hero-server-id')?.textContent || '';
   if (!id || id === '—') {
@@ -215,7 +231,7 @@ function toastOnce(key, msg, isErr = false) {
 }
 
 function getKey() {
-  return (document.getElementById('f-key').value || '').trim();
+  return (document.getElementById('f-key')?.value || '').trim();
 }
 
 function withAuthHeaders(extra = {}) {
@@ -296,7 +312,7 @@ function applyStatus(d) {
   }
   
   var sAddr = document.getElementById('s-addr');
-  if (sAddr) sAddr.textContent = d.running ? (d.local_ip || 'localhost') + ':25565' : (d.remote_host ? 'Remote Host' : '---');
+  if (sAddr) sAddr.textContent = d.running ? (d.local_ip || 'localhost') + ':25565' : (d.remote_host ? ('Remote Host (' + (state.hostIp || 'Syncing...') + ')') : '---');
   
   var sPlayers = document.getElementById('s-players');
   if (sPlayers) sPlayers.textContent = String(d.players_count || 0);
@@ -329,11 +345,11 @@ function applyStatus(d) {
   if (typeof renderDeps === 'function') renderDeps(d.deps);
 
   var cpu = setFill('m-cpu', d.server_cpu_pct || 0);
-  var mem = setFill('m-mem', d.server_cpu_pct ? (d.server_mem_pct || 0) : 0);
+  var mem = setFill('m-mem', d.any_running ? (d.server_mem_pct || 0) : 0);
   var cpuV = document.getElementById('m-cpu-v');
   var memV = document.getElementById('m-mem-v');
-  if (cpuV) cpuV.textContent = d.running ? (cpu + '%') : '0%';
-  if (memV) memV.textContent = d.running ? (mem + '%') : '0%';
+  if (cpuV) cpuV.textContent = d.any_running ? (cpu + '%') : '0%';
+  if (memV) memV.textContent = d.any_running ? (mem + '%') : '0%';
 
   var hint = document.getElementById('start-hint');
   var blockReason = String(d.start_block_reason || '').trim();
@@ -419,8 +435,8 @@ function renderMembers(d) {
     const dot = m.hosting ? '🟢' : (m.online ? '🟡' : '⚫');
     const tag = m.hosting ? 'hosting' : (m.online ? 'online' : 'offline');
     return `<div class="member-row ${m.online ? 'on' : ''}">
-      <span><b>${dot} ${m.user || 'Unknown'}</b></span>
-      <span class="small">${m.hostname || ''} · ${tag}${m.ip ? ' · ' + m.ip : ''}</span>
+      <span><b>${dot} ${escapeHtml(m.user || 'Unknown')}</b></span>
+      <span class="small">${escapeHtml(m.hostname || '')} · ${tag}${m.ip ? ' · ' + escapeHtml(m.ip) : ''}</span>
     </div>`;
   }).join('');
 
@@ -552,6 +568,7 @@ async function pollLogs() {
       logs = d.logs || [];
     }
     const el = document.getElementById('console');
+    if (!el) return;
     const atBottom = Math.abs(el.scrollHeight - el.scrollTop - el.clientHeight) < 30;
     el.textContent = logs.join('\n') || 'Waiting for server...';
     if (atBottom) el.scrollTop = el.scrollHeight;
@@ -577,6 +594,7 @@ async function loadBackups() {
     const d = await r.json();
     const list = Array.isArray(d.backups) ? d.backups : [];
     const wrap = document.getElementById('backup-list');
+    if (!wrap) return;
     if (!list.length) {
       wrap.innerHTML = '<div class="small">No backups yet.</div>';
       return;
@@ -584,13 +602,38 @@ async function loadBackups() {
     wrap.innerHTML = list.map(b => `
       <div class="backup-item">
         <div>
-          <div><b>${b.time}</b></div>
-          <div class="small">${b.name} (${b.size_mb} MB)</div>
+          <div><b>${escapeHtml(b.time)}</b></div>
+          <div class="small">${escapeHtml(b.name)} (${escapeHtml(b.size_mb)} MB)</div>
         </div>
-        <a class="btn-link" href="/backup/get?name=${encodeURIComponent(b.name)}" download="${b.name}">Download</a>
+        <button type="button" class="btn-link" onclick="downloadBackup('${encodeUrlArg(b.name)}')">Download</button>
       </div>
     `).join('');
   } catch (e) {}
+}
+
+async function downloadBackup(encodedName) {
+  const name = decodeURIComponent(String(encodedName || ''));
+  try {
+    const r = await fetch('/backup/get?name=' + encodeURIComponent(name), {
+      headers: withAuthHeaders({ 'Accept': 'application/zip' })
+    });
+    if (!r.ok) {
+      const txt = await r.text();
+      toast(txt || `Backup download failed (${r.status})`, true);
+      return;
+    }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name || 'backup.zip';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1200);
+  } catch (e) {
+    toast('Backup download failed', true);
+  }
 }
 
 async function post(url, body = {}) {
@@ -599,7 +642,18 @@ async function post(url, body = {}) {
     headers: withAuthHeaders(),
     body: JSON.stringify({ ...body, project_key: getKey() })
   });
-  return r.json();
+  const text = await r.text();
+  let data = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch (e) {
+    data = { ok: false, msg: text || `Request failed (${r.status})` };
+  }
+  if (!r.ok && data.ok !== false) {
+    data.ok = false;
+    data.msg = data.msg || `Request failed (${r.status})`;
+  }
+  return data;
 }
 
 function hostStartBody(extra = {}) {
@@ -615,8 +669,7 @@ async function toggleHost() {
   if (state.task?.running) return;
   const action = state.running ? 'stop' : 'start';
   if (action === 'stop') {
-    const ok = confirm('Stop server safely? (save + backup + sync)');
-    if (!ok) return;
+    // Directly stop to prevent browser confirm popup blocks
   } else if (state.can_start === false) {
     toast(state.start_block_reason || 'Cannot start right now.', true);
     return;
@@ -780,7 +833,9 @@ async function openFolder(target) {
 
 async function downloadServerFiles() {
   try {
-    const r = await fetch('/server/download');
+    const r = await fetch('/server/download', {
+      headers: withAuthHeaders({ 'Accept': 'application/zip' })
+    });
     if (!r.ok) {
       const txt = await r.text();
       toast(txt || `Download failed (${r.status})`, true);
@@ -868,9 +923,9 @@ function renderDeps(deps) {
   }
   el.classList.remove('hidden');
   const err = (deps.last_error || '').trim();
-  const hint = err ? ` ${err}` : '';
+  const hint = err ? ` ${escapeHtml(err)}` : '';
   el.innerHTML =
-    `⚠ Missing: ${missing.join(', ')}.${hint} ` +
+    `⚠ Missing: ${escapeHtml(missing.join(', '))}.${hint} ` +
     `<button type="button" class="btn-linkish" onclick="installDeps()">Ab install karo</button>`;
 }
 
