@@ -1,93 +1,295 @@
-# Setup Guide (Lightweight)
+# MC Host Manager
 
-## Ready-to-use package (quick start)
+Lightweight local Minecraft hosting dashboard with safe backup flow, real-time monitoring, and cross-platform support.
 
-If you have the packaged release zip, unzip it and run:
+---
+
+# Overview
+
+MC Host Manager is a lightweight local-first Minecraft server management system designed for stability, safety, and minimal overhead.
+
+It provides:
+
+* Safe server lifecycle management
+* Automatic backup handling
+* Real-time system monitoring
+* Lightweight web dashboard
+* Cross-platform launch/build support
+* Local network remote controls
+
+The project intentionally avoids heavy orchestration layers and large hosting panel stacks to remain fast and reliable for self-hosted environments.
+
+---
+
+# Features
+
+## Server Management
+
+* Start / Stop / Restart Minecraft servers
+* Live server status monitoring
+* Console log streaming
+* Lightweight process management
+
+## Safe Stop Flow
+
+MC Host Manager performs a protected shutdown sequence:
+
+1. Save world state
+2. Stop server safely
+3. Create backup
+4. Sync world files
+5. Release active lock
+
+This reduces corruption risks during shutdowns or crashes.
+
+---
+
+## Monitoring
+
+Real-time resource monitoring:
+
+* CPU usage
+* RAM usage
+* Disk I/O activity
+* Server process status
+
+---
+
+## Backup System
+
+* Automatic backup creation
+* Backup listing
+* Backup downloads
+* Full server ZIP export
+
+---
+
+## Lightweight Architecture
+
+Designed for low overhead and local hosting.
+
+### Included
+
+* Lightweight backend
+* Fast polling system
+* Cached status snapshots
+* Minimal background workers
+* Minimal API surface
+* Local-first architecture
+
+### Excluded
+
+* Heavy orchestration layers
+* Cloud dependency stack
+* Large hosting panel frameworks
+
+---
+
+# Lock & Safety System
+
+The application uses a lock + heartbeat system to prevent unsafe multi-instance hosting.
+
+## Safety Logic
+
+* Lock acquired before startup
+* Heartbeat maintained while hosting
+* Automatic finalize flow on crash
+* Active lock protection
+* Safe unlock handling
+* Protected force-clear behavior
+
+---
+
+# Requirements
+
+## Linux / Windows
+
+* Python 3.10+
+* Java installed
+* Minecraft server files
+
+---
+
+# Installation
+
+## Install from PyPI (Beta)
+
+```bash
+pip install --pre mc-host-manager
+```
+
+Specific version:
+
+```bash
+pip install mc-host-manager==1.0.0b1
+```
+
+---
+
+# Run From Source
+
+Linux:
 
 ```bash
 bash launch.sh
 ```
 
-Windows users can run `launch.bat`.
+Windows:
 
-Open the dashboard in your browser at `http://localhost:7842`.
+```bat
+launch.bat
+```
 
-## 1. Prepare folders
+Open dashboard:
 
-You need 2 folders:
+```text
+http://localhost:7842
+```
 
-1. **Server Folder** (contains `server.jar` / `run.sh`)
-2. **Shared Folder** (Syncthing folder used for backups/world sync)
+---
 
-Shared folder auto-uses:
+# Docker
 
-- `backups/`
-- `world_latest/`
-- `host.lock`
+Pull image:
 
-## 2. Start app
+```bash
+docker pull ghcr.io/shivam238/mc-host-manager:v1.0.0b1
+```
+
+Run container:
+
+```bash
+docker run -p 7842:7842 ghcr.io/shivam238/mc-host-manager:v1.0.0b1
+```
+
+---
+
+# Ready-to-use Package
+
+Prebuilt packages are available in:
+
+```text
+release/
+```
+
+Example:
+
+```text
+mc-host-manager-ready-to-use-*.zip
+```
+
+The packaged build already includes:
+
+* Application files
+* UI assets
+* Runtime configuration
+* Documentation
+
+Run packaged version:
+
+Linux:
 
 ```bash
 bash launch.sh
 ```
 
-Open `http://localhost:7842`
+Windows:
 
-## 3. Save settings
+```bat
+launch.bat
+```
 
-In dashboard Settings:
+---
 
-- User Name
-- Project Name
-- Server Folder path
-- Shared Folder path
-- RAM
-- Max Players
-- Server JAR
-- Whitelist toggle
+# Remote Controls (LAN)
 
-Click **Save**.
+When opened from another device, control actions require a matching `project_key`.
 
-## 4. Start hosting
+## Security
 
-Click **START**.
+* Project key shown in Settings
+* Matching key required for remote control
+* Prevents unauthorized actions from other devices
 
-Flow:
+---
 
-- lock check
-- lock acquire
-- world copy from `shared/world_latest` (if exists)
-- server start
+# Build
 
-## 5. Stop hosting safely
+## Linux
 
-Click **STOP**.
+```bash
+bash build.sh
+```
 
-Flow:
+## Windows
 
-- save + stop server
-- backup ZIP in `shared/backups`
-- sync world to `shared/world_latest`
-- lock release
+```bat
+build.bat
+```
 
-## 6. Multi-screen control
+---
 
-To control from another screen/device:
+# Project Structure
 
-- open same dashboard URL
-- use same **Project Key** shown in Settings
+```text
+MC_HOSTER/
+├── ui/
+├── release/
+├── backups/
+├── host_manager.py
+├── api_handler.py
+├── launch.sh
+├── launch.bat
+├── build.sh
+├── build.bat
+└── pyproject.toml
+```
 
-If key mismatches, control actions are blocked.
+---
 
-## 7. Syncthing
+# Release Status
 
-- App does not force heavy Syncthing automation
-- `Sync Now` triggers scan only
-- Keep Syncthing running externally for cross-device file sync
+Current release:
 
-## Troubleshooting
+```text
+v1.0.0b1 (Beta)
+```
 
-- **Locked by another host**: stop on host machine first
-- **Project key mismatch**: use same key on both screens
-- **No JAR found**: fix `Server JAR` in Settings
-- **Download failed**: stop server first, then retry
+This is an early beta release and may contain unfinished features or bugs.
+
+Feedback, testing, and bug reports are welcome.
+
+---
+
+# Roadmap
+
+Planned improvements:
+
+* Improved remote management
+* Better multi-server support
+* Enhanced backup scheduling
+* Plugin/modpack presets
+* WebSocket live updates
+* Advanced metrics dashboard
+
+---
+
+# Repository
+
+GitHub Repository:
+
+[mc-host-manager GitHub Repository](https://github.com/shivam238/mc-host-manager?utm_source=chatgpt.com)
+
+PyPI Package:
+
+[mc-host-manager on PyPI](https://pypi.org/project/mc-host-manager/?utm_source=chatgpt.com)
+
+GitHub Container Package:
+
+[GitHub Container Registry Package](https://github.com/shivam238/mc-host-manager/pkgs/container/mc-host-manager?utm_source=chatgpt.com)
+
+---
+
+# License
+
+This project is released under the project license included in the repository.
