@@ -337,7 +337,7 @@ def get_status(cfg: dict[str, Any]) -> dict[str, Any]:
         "can_start": can_start_val,
         "start_block_reason": block_reason,
         "sync_isolated": bool(gate.get("sync_isolated")),
-        "remote_host": str(gate.get("remote_host") or ""),
+        "remote_host": gate.get("remote_host", {}).get("user", "") if isinstance(gate.get("remote_host"), dict) else str(gate.get("remote_host") or ""),
         "remote_lock_peer": str((remote_lock or {}).get("peer_ip", "") or ""),
         "strict_sync_gate": bool(cfg.get("strict_sync_gate", False)),
         "auto_world_before_start": bool(cfg.get("auto_world_before_start", True)),
@@ -928,7 +928,8 @@ class APIHandler(BaseHTTPRequestHandler):
                 )
                 return
             if not gate.get("can_start"):
-                remote = str(gate.get("remote_host") or "")
+                rh = gate.get("remote_host")
+                remote = rh.get("user", "") if isinstance(rh, dict) else str(rh or "")
                 allow_override = bool(body.get("ack_isolated_risk")) and not remote
                 if not allow_override:
                     self._json({"ok": False, "msg": str(gate.get("start_block_reason") or "Cannot start server.")})

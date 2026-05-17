@@ -150,6 +150,11 @@ def refresh_lock(shared_dir: str | Path, user_name: str, project_key: str = "", 
         tmp = p.with_suffix(p.suffix + ".tmp")
         tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
         tmp.replace(p)
+    except Exception:
+        with open(str(p), "w", encoding="utf-8", errors="replace") as f:
+            json.dump(data, f, indent=2)
+    
+    try:
         _write_status(shared_dir, user_name, data["ui_url"])
         return True, "lock refreshed"
     except Exception as e:
