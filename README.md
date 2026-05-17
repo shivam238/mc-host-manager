@@ -2,60 +2,148 @@
 
 Fast local Minecraft host dashboard with safe lock + backup flow.
 
-## What It Does
+## Features
 
-- Start / Stop / Restart server
-- Safe stop flow: `save -> stop -> backup -> sync world -> unlock`
-- Live status + console logs
-- Real-time CPU/RAM/I/O bars (server process based)
-- Backup list + download
-- Download full current server files (ZIP)
-- Open server/shared/backups folders from UI
+* Start / Stop / Restart Minecraft server
+* Safe stop flow:
+
+  * Save world
+  * Stop server
+  * Create backup
+  * Sync world files
+  * Release lock safely
+* Live server status + console logs
+* Real-time CPU / RAM / I/O monitoring
+* Backup management + downloads
+* Download full current server files as ZIP
+* Open server/shared/backups folders directly from UI
+* Lightweight architecture focused on stability and low overhead
+
+---
 
 ## Lightweight Design
 
 This build intentionally removes heavy multi-layer automation and keeps only core stable logic.
 
-- Minimal background threads
-- Minimal endpoints
-- No large control-panel stack
-- Fast polling with lightweight cached status snapshots
+### Included
 
-## Key Logic
+* Lightweight backend
+* Fast polling
+* Cached status snapshots
+* Minimal background threads
+* Minimal API endpoints
+* Stable local-first architecture
 
-- Lock is acquired **before** start sequence
-- Lock heartbeat runs while hosting
-- On crash while hosting, auto finalize flow runs to release lock safely
-- Force clear is blocked if active lock exists
+### Excluded
 
-## Run (source)
+* Heavy orchestration layers
+* Large control panel stack
+* Cloud dependency requirements
+
+---
+
+## Safety & Lock System
+
+* Lock is acquired **before** server startup
+* Lock heartbeat runs while hosting
+* Auto finalize flow runs on unexpected crash/shutdown
+* Force clear is blocked while active lock exists
+* Safe backup flow protects world consistency
+
+---
+
+## Requirements
+
+* Python 3.10+
+* Java installed
+* Linux or Windows
+
+---
+
+# Installation
+
+## Install from PyPI (Beta)
+
+```bash
+pip install --pre mc-host-manager
+```
+
+Specific version:
+
+```bash
+pip install mc-host-manager==1.0.0b1
+```
+
+---
+
+# Run From Source
+
+Linux:
 
 ```bash
 bash launch.sh
 ```
 
-Open: `http://localhost:7842`
+Open in browser:
 
-## Ready-to-use package
+```text
+http://localhost:7842
+```
 
-A packaged ready-to-use app is available in `release/` as `mc-host-manager-ready-to-use-*.zip`.
+---
 
-Unzip it and run:
+# Ready-to-use Package
+
+A packaged ready-to-use app is available in:
+
+```text
+release/
+```
+
+Example package:
+
+```text
+mc-host-manager-ready-to-use-*.zip
+```
+
+## Run packaged build
+
+Linux:
 
 ```bash
 bash launch.sh
 ```
 
-The package already includes the app files, UI assets, and docs.
+Windows:
 
-## Controls From Another Screen/PC
+```bat
+launch.bat
+```
+
+The package already includes:
+
+* App files
+* UI assets
+* Documentation
+* Runtime configuration
+
+---
+
+# Remote Controls (LAN / Another Device)
 
 If dashboard is opened from another device, control actions require matching `project_key`.
 
-- Project key is shown in Settings
-- Same key on both screens allows control
+## Security Logic
 
-## Build
+* Project key is shown in Settings
+* Same key on both screens allows control
+* Prevents unauthorized remote control requests
+
+---
+
+# Build
+
+Linux:
 
 ```bash
 bash build.sh
@@ -66,3 +154,29 @@ Windows:
 ```bat
 build.bat
 ```
+
+---
+
+# Release Notes
+
+Current release:
+
+```text
+v1.0.0b1 (Beta)
+```
+
+This is an early beta release and may contain unfinished features or bugs.
+
+Feedback and bug reports are welcome.
+
+---
+
+# Repository
+
+GitHub Repository:
+
+[mc-host-manager GitHub Repository](https://github.com/shivam238/mc-host-manager?utm_source=chatgpt.com)
+
+PyPI Package:
+
+[mc-host-manager on PyPI](https://pypi.org/project/mc-host-manager/?utm_source=chatgpt.com)
