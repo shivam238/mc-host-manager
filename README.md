@@ -1,62 +1,112 @@
-# MC Host Manager (Lightweight)
+# MC Host Manager
 
-Fast local Minecraft host dashboard with safe lock + backup flow.
-
-## Features
-
-* Start / Stop / Restart Minecraft server
-* Safe stop flow:
-
-  * Save world
-  * Stop server
-  * Create backup
-  * Sync world files
-  * Release lock safely
-* Live server status + console logs
-* Real-time CPU / RAM / I/O monitoring
-* Backup management + downloads
-* Download full current server files as ZIP
-* Open server/shared/backups folders directly from UI
-* Lightweight architecture focused on stability and low overhead
+Lightweight local Minecraft hosting dashboard with safe backup flow, real-time monitoring, and cross-platform support.
 
 ---
 
-## Lightweight Design
+# Overview
 
-This build intentionally removes heavy multi-layer automation and keeps only core stable logic.
+MC Host Manager is a lightweight local-first Minecraft server management system designed for stability, safety, and minimal overhead.
+
+It provides:
+
+* Safe server lifecycle management
+* Automatic backup handling
+* Real-time system monitoring
+* Lightweight web dashboard
+* Cross-platform launch/build support
+* Local network remote controls
+
+The project intentionally avoids heavy orchestration layers and large hosting panel stacks to remain fast and reliable for self-hosted environments.
+
+---
+
+# Features
+
+## Server Management
+
+* Start / Stop / Restart Minecraft servers
+* Live server status monitoring
+* Console log streaming
+* Lightweight process management
+
+## Safe Stop Flow
+
+MC Host Manager performs a protected shutdown sequence:
+
+1. Save world state
+2. Stop server safely
+3. Create backup
+4. Sync world files
+5. Release active lock
+
+This reduces corruption risks during shutdowns or crashes.
+
+---
+
+## Monitoring
+
+Real-time resource monitoring:
+
+* CPU usage
+* RAM usage
+* Disk I/O activity
+* Server process status
+
+---
+
+## Backup System
+
+* Automatic backup creation
+* Backup listing
+* Backup downloads
+* Full server ZIP export
+
+---
+
+## Lightweight Architecture
+
+Designed for low overhead and local hosting.
 
 ### Included
 
 * Lightweight backend
-* Fast polling
+* Fast polling system
 * Cached status snapshots
-* Minimal background threads
-* Minimal API endpoints
-* Stable local-first architecture
+* Minimal background workers
+* Minimal API surface
+* Local-first architecture
 
 ### Excluded
 
 * Heavy orchestration layers
-* Large control panel stack
-* Cloud dependency requirements
+* Cloud dependency stack
+* Large hosting panel frameworks
 
 ---
 
-## Safety & Lock System
+# Lock & Safety System
 
-* Lock is acquired **before** server startup
-* Lock heartbeat runs while hosting
-* Auto finalize flow runs on unexpected crash/shutdown
-* Force clear is blocked while active lock exists
-* Safe backup flow protects world consistency
+The application uses a lock + heartbeat system to prevent unsafe multi-instance hosting.
+
+## Safety Logic
+
+* Lock acquired before startup
+* Heartbeat maintained while hosting
+* Automatic finalize flow on crash
+* Active lock protection
+* Safe unlock handling
+* Protected force-clear behavior
 
 ---
 
-## Requirements
+# Requirements
+
+## Linux / Windows
 
 * Python 3.10+
 * Java installed
-* Linux or Windows
+* Minecraft server files
 
 ---
 
@@ -84,7 +134,13 @@ Linux:
 bash launch.sh
 ```
 
-Open in browser:
+Windows:
+
+```bat
+launch.bat
+```
+
+Open dashboard:
 
 ```text
 http://localhost:7842
@@ -92,21 +148,44 @@ http://localhost:7842
 
 ---
 
+# Docker
+
+Pull image:
+
+```bash
+docker pull ghcr.io/shivam238/mc-host-manager:v1.0.0b1
+```
+
+Run container:
+
+```bash
+docker run -p 7842:7842 ghcr.io/shivam238/mc-host-manager:v1.0.0b1
+```
+
+---
+
 # Ready-to-use Package
 
-A packaged ready-to-use app is available in:
+Prebuilt packages are available in:
 
 ```text
 release/
 ```
 
-Example package:
+Example:
 
 ```text
 mc-host-manager-ready-to-use-*.zip
 ```
 
-## Run packaged build
+The packaged build already includes:
+
+* Application files
+* UI assets
+* Runtime configuration
+* Documentation
+
+Run packaged version:
 
 Linux:
 
@@ -120,36 +199,29 @@ Windows:
 launch.bat
 ```
 
-The package already includes:
-
-* App files
-* UI assets
-* Documentation
-* Runtime configuration
-
 ---
 
-# Remote Controls (LAN / Another Device)
+# Remote Controls (LAN)
 
-If dashboard is opened from another device, control actions require matching `project_key`.
+When opened from another device, control actions require a matching `project_key`.
 
-## Security Logic
+## Security
 
-* Project key is shown in Settings
-* Same key on both screens allows control
-* Prevents unauthorized remote control requests
+* Project key shown in Settings
+* Matching key required for remote control
+* Prevents unauthorized actions from other devices
 
 ---
 
 # Build
 
-Linux:
+## Linux
 
 ```bash
 bash build.sh
 ```
 
-Windows:
+## Windows
 
 ```bat
 build.bat
@@ -157,7 +229,25 @@ build.bat
 
 ---
 
-# Release Notes
+# Project Structure
+
+```text
+MC_HOSTER/
+├── ui/
+├── release/
+├── backups/
+├── host_manager.py
+├── api_handler.py
+├── launch.sh
+├── launch.bat
+├── build.sh
+├── build.bat
+└── pyproject.toml
+```
+
+---
+
+# Release Status
 
 Current release:
 
@@ -167,7 +257,20 @@ v1.0.0b1 (Beta)
 
 This is an early beta release and may contain unfinished features or bugs.
 
-Feedback and bug reports are welcome.
+Feedback, testing, and bug reports are welcome.
+
+---
+
+# Roadmap
+
+Planned improvements:
+
+* Improved remote management
+* Better multi-server support
+* Enhanced backup scheduling
+* Plugin/modpack presets
+* WebSocket live updates
+* Advanced metrics dashboard
 
 ---
 
@@ -180,3 +283,13 @@ GitHub Repository:
 PyPI Package:
 
 [mc-host-manager on PyPI](https://pypi.org/project/mc-host-manager/?utm_source=chatgpt.com)
+
+GitHub Container Package:
+
+[GitHub Container Registry Package](https://github.com/shivam238/mc-host-manager/pkgs/container/mc-host-manager?utm_source=chatgpt.com)
+
+---
+
+# License
+
+This project is released under the project license included in the repository.
