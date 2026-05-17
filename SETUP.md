@@ -1,5 +1,17 @@
 # Setup Guide (Lightweight)
 
+## Ready-to-use package (quick start)
+
+If you have the packaged release zip, unzip it and run:
+
+```bash
+bash launch.sh
+```
+
+Windows users can run `launch.bat`.
+
+Open the dashboard in your browser at `http://localhost:7842`.
+
 ## 1. Prepare folders
 
 You need 2 folders:

@@ -36,6 +36,18 @@ bash launch.sh
 
 Open: `http://localhost:7842`
 
+## Ready-to-use package
+
+A packaged ready-to-use app is available in `release/` as `mc-host-manager-ready-to-use-*.zip`.
+
+Unzip it and run:
+
+```bash
+bash launch.sh
+```
+
+The package already includes the app files, UI assets, and docs.
+
 ## Controls From Another Screen/PC
 
 If dashboard is opened from another device, control actions require matching `project_key`.
